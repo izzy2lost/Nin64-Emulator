@@ -11,6 +11,7 @@ extern int android_port_frame_height(void);
 extern int android_port_swap_count(void);
 extern int android_port_background_copy_count(void);
 extern int android_port_copy_framebuffer(unsigned int *buffer, int max_pixels);
+extern void android_port_set_pad_state(unsigned int button_mask, int stick_x, int stick_y);
 extern void os_dumpinfo(void);
 
 static void copy_jstring(JNIEnv *env, jstring value, char *buffer, size_t buffer_size)
@@ -329,4 +330,18 @@ Java_com_izzy2lost_nin64_NativeBridge_copyFrameBufferArgbInto(JNIEnv *env, jobje
     copied_pixels=android_port_copy_framebuffer((uint32_t *)pixels,(int)max_pixels);
     (*env)->ReleasePrimitiveArrayCritical(env,array,pixels,0);
     return (jint)copied_pixels;
+}
+
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_setControllerState(
+    JNIEnv *env,
+    jobject thiz,
+    jint buttonMask,
+    jint stickX,
+    jint stickY
+)
+{
+    (void)env;
+    (void)thiz;
+    android_port_set_pad_state((unsigned int)buttonMask, (int)stickX, (int)stickY);
 }

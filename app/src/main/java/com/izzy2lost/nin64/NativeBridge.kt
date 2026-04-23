@@ -16,4 +16,5 @@ object NativeBridge {
     external fun bootRomForPlay(rootPath: String, romPath: String): String
     external fun runFrame(ops: Int)
     external fun getSwapCount(): Int
+    external fun setControllerState(buttonMask: Int, stickX: Int, stickY: Int)
 }
