@@ -2,29 +2,30 @@ package com.izzy2lost.nin64
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.PixelFormat
-import android.graphics.RectF
+import android.util.Log
 import android.os.Bundle
 import android.os.Process
-import android.os.SystemClock
+import android.view.Gravity
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.WindowManager
+import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import kotlin.math.abs
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
+    private val logTag = "Nin64Game"
 
+    private lateinit var rootContainer: FrameLayout
     private lateinit var surfaceView: SurfaceView
-    private val blitRect = RectF()
 
     @Volatile private var running = false
     private var emulationThread: Thread? = null
@@ -44,13 +45,26 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
             WindowManager.LayoutParams.FLAG_FULLSCREEN
         )
 
+        rootContainer = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+        }
+
         surfaceView = SurfaceView(this).apply {
             holder.setFormat(PixelFormat.RGBX_8888)
             isFocusable = true
             isFocusableInTouchMode = true
             requestFocus()
         }
-        setContentView(surfaceView)
+
+        rootContainer.addView(
+            surfaceView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
+            )
+        )
+        setContentView(rootContainer)
         surfaceView.holder.addCallback(this)
         pushControllerState()
     }
@@ -60,26 +74,51 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
             finish()
             return
         }
-        startEmulation(holder)
+        Log.i(logTag, "surfaceCreated ${holder.surfaceFrame.width()}x${holder.surfaceFrame.height()} rom=$romPath")
+        NativeBridge.setSurface(holder.surface, holder.surfaceFrame.width(), holder.surfaceFrame.height())
+        startEmulation()
     }
 
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        Log.i(logTag, "surfaceChanged ${width}x${height} format=$format")
+        NativeBridge.setSurface(holder.surface, width, height)
+    }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
+        Log.i(logTag, "surfaceDestroyed")
         stopEmulation()
+        NativeBridge.clearSurface()
     }
 
     override fun onResume() {
         super.onResume()
         surfaceView.requestFocus()
+        updateSurfaceLayoutForCurrentFrame()
     }
 
-    private fun startEmulation(holder: SurfaceHolder) {
+    private fun startEmulation() {
         running = true
         emulationThread = Thread {
             Process.setThreadPriority(Process.THREAD_PRIORITY_DISPLAY)
-            NativeBridge.bootRomForPlay(rootPath, romPath)
-            emulationLoop(holder)
+            try {
+                Log.i(logTag, "emulation thread boot start")
+                val bootResult = NativeBridge.bootRomForPlay(rootPath, romPath)
+                Log.i(logTag, "boot result=$bootResult")
+                if (bootResult != "booted") {
+                    running = false
+                    runOnUiThread {
+                        Toast.makeText(this, bootResult, Toast.LENGTH_LONG).show()
+                        finish()
+                    }
+                    return@Thread
+                }
+
+                updateSurfaceLayoutForCurrentFrame()
+                emulationLoop()
+            } finally {
+                Log.i(logTag, "emulation thread shutting down")
+                NativeBridge.shutdownSession()
+            }
         }.apply {
             name = "Nin64-Emu"
             start()
@@ -141,70 +180,51 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         return true
     }
 
-    private fun emulationLoop(holder: SurfaceHolder) {
-        val paint = Paint().apply { isFilterBitmap = false }
-        var frameBitmap: Bitmap? = null
-        var framePixels: IntArray? = null
-        var lastSwap = NativeBridge.getSwapCount()
-        var lastPresentAtMs = 0L
-
+    private fun emulationLoop() {
         while (running) {
             NativeBridge.runFrame(OPS_PER_CHUNK)
-
-            val swap = NativeBridge.getSwapCount()
-            if (swap == lastSwap) continue
-            lastSwap = swap
-
-            val w = NativeBridge.getFrameWidth()
-            val h = NativeBridge.getFrameHeight()
-            if (w <= 0 || h <= 0) continue
-
-            val nowMs = SystemClock.uptimeMillis()
-            if (nowMs - lastPresentAtMs < MIN_PRESENT_INTERVAL_MS) {
-                continue
-            }
-            lastPresentAtMs = nowMs
-
-            val totalPixels = w * h
-            if (framePixels == null || framePixels!!.size < totalPixels) {
-                framePixels = IntArray(totalPixels)
-            }
-            val pixels = framePixels!!
-            val copiedPixels = NativeBridge.copyFrameBufferArgbInto(pixels)
-            if (copiedPixels < totalPixels) continue
-
-            if (frameBitmap == null || frameBitmap!!.width != w || frameBitmap!!.height != h) {
-                frameBitmap?.recycle()
-                frameBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-            }
-            frameBitmap!!.setPixels(pixels, 0, w, 0, 0, w, h)
-
-            val canvas: Canvas = holder.lockCanvas() ?: continue
-            try {
-                blit(canvas, frameBitmap!!, paint)
-            } finally {
-                holder.unlockCanvasAndPost(canvas)
-            }
         }
-
-        frameBitmap?.recycle()
     }
 
-    private fun blit(canvas: Canvas, bitmap: Bitmap, paint: Paint) {
-        canvas.drawColor(Color.BLACK)
-
-        val srcAspect = bitmap.width.toFloat() / bitmap.height.toFloat()
-        val dstAspect = canvas.width.toFloat() / canvas.height.toFloat()
-
-        if (srcAspect > dstAspect) {
-            val h = canvas.width / srcAspect
-            blitRect.set(0f, (canvas.height - h) / 2f, canvas.width.toFloat(), (canvas.height + h) / 2f)
-        } else {
-            val w = canvas.height * srcAspect
-            blitRect.set((canvas.width - w) / 2f, 0f, (canvas.width + w) / 2f, canvas.height.toFloat())
+    private fun updateSurfaceLayoutForCurrentFrame() {
+        val frameWidth = NativeBridge.getFrameWidth()
+        val frameHeight = NativeBridge.getFrameHeight()
+        if (frameWidth <= 0 || frameHeight <= 0) {
+            return
         }
 
-        canvas.drawBitmap(bitmap, null, blitRect, paint)
+        runOnUiThread {
+            val parentWidth = rootContainer.width
+            val parentHeight = rootContainer.height
+            if (parentWidth <= 0 || parentHeight <= 0) {
+                rootContainer.post { updateSurfaceLayoutForCurrentFrame() }
+                return@runOnUiThread
+            }
+
+            val scale = min(
+                parentWidth.toFloat() / frameWidth.toFloat(),
+                parentHeight.toFloat() / frameHeight.toFloat()
+            )
+            val targetWidth = (frameWidth * scale).roundToInt().coerceAtLeast(2)
+            val targetHeight = (frameHeight * scale).roundToInt().coerceAtLeast(2)
+            val currentParams = surfaceView.layoutParams as FrameLayout.LayoutParams
+
+            if (currentParams.width == targetWidth &&
+                currentParams.height == targetHeight &&
+                currentParams.gravity == Gravity.CENTER) {
+                return@runOnUiThread
+            }
+
+            Log.i(
+                logTag,
+                "updateSurfaceLayout frame=${frameWidth}x${frameHeight} target=${targetWidth}x${targetHeight} parent=${parentWidth}x${parentHeight}"
+            )
+            surfaceView.layoutParams = FrameLayout.LayoutParams(
+                targetWidth,
+                targetHeight,
+                Gravity.CENTER
+            )
+        }
     }
 
     private fun pushControllerState() {
@@ -300,6 +320,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         analogStickY = 0
         pushControllerState()
         stopEmulation()
+        NativeBridge.clearSurface()
         super.onDestroy()
     }
 
@@ -307,7 +328,6 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         private const val EXTRA_ROOT_PATH = "extra_root_path"
         private const val EXTRA_ROM_PATH = "extra_rom_path"
         private const val OPS_PER_CHUNK = 2_000_000
-        private const val MIN_PRESENT_INTERVAL_MS = 33L
         private const val STICK_MAX = 80
         private const val C_BUTTON_THRESHOLD = 0.5f
         private const val HAT_THRESHOLD = 0.5f

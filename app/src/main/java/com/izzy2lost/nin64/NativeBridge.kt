@@ -1,8 +1,10 @@
 package com.izzy2lost.nin64
 
+import android.view.Surface
+
 object NativeBridge {
     init {
-        System.loadLibrary("ultrahle_core")
+        System.loadLibrary("nin64_core")
     }
 
     external fun init(rootPath: String): String
@@ -17,4 +19,7 @@ object NativeBridge {
     external fun runFrame(ops: Int)
     external fun getSwapCount(): Int
     external fun setControllerState(buttonMask: Int, stickX: Int, stickY: Int)
+    external fun setSurface(surface: Surface?, width: Int, height: Int)
+    external fun clearSurface()
+    external fun shutdownSession()
 }

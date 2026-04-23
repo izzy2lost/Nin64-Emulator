@@ -345,3 +345,33 @@ Java_com_izzy2lost_nin64_NativeBridge_setControllerState(
     (void)thiz;
     android_port_set_pad_state((unsigned int)buttonMask, (int)stickX, (int)stickY);
 }
+
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_setSurface(
+    JNIEnv *env,
+    jobject thiz,
+    jobject surface,
+    jint width,
+    jint height
+)
+{
+    (void)env;
+    (void)thiz;
+    (void)surface;
+    (void)width;
+    (void)height;
+}
+
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_clearSurface(JNIEnv *env, jobject thiz)
+{
+    (void)env;
+    (void)thiz;
+}
+
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_shutdownSession(JNIEnv *env, jobject thiz)
+{
+    (void)env;
+    (void)thiz;
+}

@@ -3,6 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val nin64CoreBackend = (project.findProperty("nin64CoreBackend") as String?) ?: "libretro"
+
 android {
     namespace = "com.izzy2lost.nin64"
     compileSdk = 36
@@ -23,6 +25,7 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += ""
+                arguments += listOf("-DNIN64_CORE_BACKEND=$nin64CoreBackend")
             }
         }
     }
@@ -42,6 +45,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_21
     }
 
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDir("src/main/jniLibs")
+        }
+    }
+
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
@@ -53,6 +62,19 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+    }
+}
+
+tasks.register<Exec>("buildMupen64PlusNextArm64") {
+    group = "native"
+    description = "Builds the vendored Mupen64Plus-Next libretro core for arm64-v8a and copies it into app/src/main/jniLibs."
+    workingDir = rootDir
+    commandLine("bash", "${rootDir}/scripts/build_mupen64plus_next_android.sh")
+}
+
+if (nin64CoreBackend == "libretro") {
+    tasks.named("preBuild") {
+        dependsOn("buildMupen64PlusNextArm64")
     }
 }
 
