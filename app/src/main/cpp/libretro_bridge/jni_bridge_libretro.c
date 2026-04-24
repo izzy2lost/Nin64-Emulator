@@ -17,6 +17,7 @@
 #include <time.h>
 
 #include "libretro.h"
+#include "audio_player.h"
 
 #ifndef NIN64_LIBRETRO_CORE_NAME
 #define NIN64_LIBRETRO_CORE_NAME "libmupen64plus_next_libretro.so"
@@ -1212,13 +1213,13 @@ static void bridge_video_refresh(const void *data, unsigned width, unsigned heig
 
 static void bridge_audio_sample(int16_t left, int16_t right)
 {
-    (void)left;
-    (void)right;
+    int16_t frame[2] = {left, right};
+    audio_player_push_batch(frame, 1);
 }
 
 static size_t bridge_audio_sample_batch(const int16_t *data, size_t frames)
 {
-    (void)data;
+    audio_player_push_batch(data, frames);
     return frames;
 }
 
@@ -1462,6 +1463,8 @@ static void bridge_reset_video_state(void)
 
 static void bridge_unload_game(void)
 {
+    audio_player_stop();
+    
     if (g_bridge.game_loaded) {
         g_bridge.retro_unload_game();
         g_bridge.game_loaded = 0;
@@ -1515,6 +1518,11 @@ static int bridge_load_game_from_path(const char *root_path, const char *rom_pat
 
     memset(&g_bridge.av_info, 0, sizeof(g_bridge.av_info));
     g_bridge.retro_get_system_av_info(&g_bridge.av_info);
+    
+    // Start Oboe Audio
+    int sample_rate = (int)(g_bridge.av_info.timing.sample_rate > 0 ? g_bridge.av_info.timing.sample_rate : 44100);
+    audio_player_start(sample_rate);
+    
     g_bridge.frame_width = g_bridge.av_info.geometry.base_width;
     g_bridge.frame_height = g_bridge.av_info.geometry.base_height;
     g_bridge.frame_interval_ns = bridge_compute_frame_interval_ns(g_bridge.av_info.timing.fps);

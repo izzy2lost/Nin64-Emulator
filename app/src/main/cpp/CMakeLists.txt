@@ -20,6 +20,7 @@ find_library(android-lib android)
 find_library(dl-lib dl)
 find_library(egl-lib EGL)
 find_library(glesv3-lib GLESv3)
+find_package(oboe REQUIRED CONFIG)
 
 if(NOT NIN64_CORE_BACKEND STREQUAL "legacy" AND NOT NIN64_CORE_BACKEND STREQUAL "libretro")
     message(FATAL_ERROR "Unsupported NIN64_CORE_BACKEND='${NIN64_CORE_BACKEND}'. Use 'legacy' or 'libretro'.")
@@ -110,6 +111,7 @@ else()
         nin64_core
         SHARED
         "${CMAKE_CURRENT_LIST_DIR}/libretro_bridge/jni_bridge_libretro.c"
+        "${CMAKE_CURRENT_LIST_DIR}/libretro_bridge/audio_player.cpp"
     )
 
     target_include_directories(
@@ -149,5 +151,6 @@ if(NIN64_CORE_BACKEND STREQUAL "libretro")
         PRIVATE
         ${egl-lib}
         ${glesv3-lib}
+        oboe::oboe
     )
 endif()

@@ -25,7 +25,7 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += ""
-                arguments += listOf("-DNIN64_CORE_BACKEND=$nin64CoreBackend")
+                arguments += listOf("-DNIN64_CORE_BACKEND=$nin64CoreBackend", "-DANDROID_STL=c++_shared")
             }
         }
     }
@@ -38,6 +38,10 @@ android {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("debug")
         }
+    }
+
+    buildFeatures {
+        prefab = true
     }
 
     compileOptions {
@@ -79,6 +83,7 @@ if (nin64CoreBackend == "libretro") {
 }
 
 dependencies {
+    implementation("com.google.oboe:oboe:1.9.0")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
