@@ -3,28 +3,26 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="?attr/colorSurface"
-    android:orientation="vertical"
-    android:fitsSystemWindows="true">
+    android:orientation="vertical">
 
     <!-- Top bar: logo (center) + settings icon (end) -->
-    <LinearLayout
+    <RelativeLayout
+        android:id="@+id/headerLayout"
         android:layout_width="match_parent"
-        android:layout_height="64dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
+        android:layout_height="wrap_content"
         android:paddingStart="8dp"
-        android:paddingEnd="8dp">
-
-        <!-- Balancing spacer so logo stays centered -->
-        <View
-            android:layout_width="48dp"
-            android:layout_height="48dp" />
+        android:paddingEnd="8dp"
+        android:clipChildren="false"
+        android:clipToPadding="false">
 
         <ImageView
-            android:layout_width="0dp"
-            android:layout_height="48dp"
-            android:layout_weight="1"
-            android:src="@mipmap/ic_launcher_foreground"
+            android:layout_width="144dp"
+            android:layout_height="144dp"
+            android:layout_centerHorizontal="true"
+            android:layout_alignParentTop="true"
+            android:layout_marginTop="-40dp"
+            android:layout_marginBottom="-20dp"
+            android:src="@drawable/logo"
             android:scaleType="fitCenter"
             android:contentDescription="@string/app_name" />
 
@@ -32,16 +30,14 @@
             android:id="@+id/settingsButton"
             android:layout_width="48dp"
             android:layout_height="48dp"
+            android:layout_alignParentEnd="true"
+            android:layout_alignParentTop="true"
+            android:layout_marginTop="8dp"
+            android:layout_marginEnd="32dp"
             android:src="@drawable/ic_settings"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/settings" />
-    </LinearLayout>
-
-    <!-- Thin divider -->
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="?attr/dividerHorizontal" />
+    </RelativeLayout>
 
     <!-- Content area with pull-to-refresh -->
     <androidx.swiperefreshlayout.widget.SwipeRefreshLayout

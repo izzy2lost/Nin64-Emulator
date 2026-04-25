@@ -1,16 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Brand colors extracted from app icon -->
-    <color name="brand_blue">#4285F4</color>
-    <color name="brand_yellow">#FBBC05</color>
-    <color name="brand_green">#34A853</color>
-    <color name="brand_red">#EA4335</color>
+    <!-- Brand colors matched to logo.xml -->
+    <color name="brand_blue">#0056EA</color>
+    <color name="brand_yellow">#FEDF5A</color>
+    <color name="brand_green">#00C063</color>
+    <color name="brand_red">#D93131</color>
 
     <!-- Light mode -->
     <color name="background">#FFFFFF</color>
     <color name="surface">#FFFFFF</color>
     <color name="on_surface">#212121</color>
     <color name="on_surface_muted">#757575</color>
+
+    <!-- Theme-sensitive colors -->
+    <color name="rom_text_color">#000000</color>
+    <color name="settings_icon_tint">@color/brand_blue</color>
 
     <!-- Legacy compat names still referenced in layouts/code -->
     <color name="action">#4285F4</color>

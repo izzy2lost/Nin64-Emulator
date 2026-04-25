@@ -4,12 +4,23 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.ListView
+import android.widget.RelativeLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.updatePadding
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -29,7 +40,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var framePreviewImage: ImageView
     private lateinit var swipeRefreshLayout: SwipeRefreshLayout
     private lateinit var pickFolderButton: android.widget.Button
-    private lateinit var romAdapter: ArrayAdapter<String>
+    private lateinit var emptyRomListText: TextView
+    private lateinit var romAdapter: RomAdapter
     private val romEntries = mutableListOf<RomEntry>()
 
     private val prefs by lazy {
@@ -51,7 +63,21 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.navigationBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
         setContentView(R.layout.activity_main)
+
+        val headerLayout = findViewById<RelativeLayout>(R.id.headerLayout)
+        ViewCompat.setOnApplyWindowInsetsListener(headerLayout) { view, insets ->
+            val topInset = insets.getInsets(
+                WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.displayCutout()
+            ).top
+            view.updatePadding(top = topInset)
+            insets
+        }
 
         statusText = findViewById(R.id.statusText)
         configPathText = findViewById(R.id.configPathText)
@@ -60,13 +86,22 @@ class MainActivity : AppCompatActivity() {
         romListView = findViewById(R.id.romListView)
         framePreviewImage = findViewById(R.id.framePreviewImage)
         swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout)
+        ViewCompat.setOnApplyWindowInsetsListener(swipeRefreshLayout) { view, insets ->
+            val navInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            val cutoutInsets = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            view.updatePadding(
+                left = maxOf(navInsets.left, cutoutInsets.left),
+                right = maxOf(navInsets.right, cutoutInsets.right),
+                bottom = navInsets.bottom,
+            )
+            insets
+        }
+
         pickFolderButton = findViewById(R.id.pickFolderButton)
+        emptyRomListText = findViewById(R.id.emptyRomListText)
 
-        val emptyRomListText = findViewById<TextView>(R.id.emptyRomListText)
-
-        romAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, mutableListOf())
+        romAdapter = RomAdapter()
         romListView.adapter = romAdapter
-        romListView.emptyView = emptyRomListText
         romListView.setOnItemClickListener { _, _, position, _ ->
             romEntries.getOrNull(position)?.let(::bootSelectedRom)
         }
@@ -236,11 +271,7 @@ class MainActivity : AppCompatActivity() {
                     romAdapter.addAll(roms.map { it.listLabel() })
                     romAdapter.notifyDataSetChanged()
                     updateGamesHeader(roms.size)
-                    statusText.text = if (roms.isEmpty()) {
-                        getString(R.string.no_games_found_status, appRomDirectory().absolutePath)
-                    } else {
-                        getString(R.string.games_found_status, roms.size)
-                    }
+                    emptyRomListText.visibility = if (roms.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
                 }.onFailure { error ->
                     romEntries.clear()
                     romAdapter.clear()
@@ -257,6 +288,7 @@ class MainActivity : AppCompatActivity() {
         val hasFolderConfigured = readSavedRomFolderUri() != null
         pickFolderButton.visibility = if (hasFolderConfigured) android.view.View.GONE else android.view.View.VISIBLE
         romListView.visibility = if (hasFolderConfigured) android.view.View.VISIBLE else android.view.View.GONE
+        if (!hasFolderConfigured) emptyRomListText.visibility = android.view.View.GONE
         swipeRefreshLayout.isEnabled = hasFolderConfigured
     }
 
@@ -570,6 +602,30 @@ class MainActivity : AppCompatActivity() {
         }
 
         return null
+    }
+
+    private inner class RomAdapter : ArrayAdapter<String>(this, R.layout.list_item_rom, mutableListOf()) {
+        private val bgColors = intArrayOf(
+            Color.parseColor("#0056EA"),
+            Color.parseColor("#FEDF5A"),
+            Color.parseColor("#00C063"),
+            Color.parseColor("#D93131"),
+        )
+
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+            val view = convertView ?: LayoutInflater.from(context)
+                .inflate(R.layout.list_item_rom, parent, false)
+            val tv = view.findViewById<TextView>(android.R.id.text1)
+            tv.text = getItem(position)
+            val bg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(bgColors[position % 4])
+                cornerRadius = 24f
+            }
+            view.background = bg
+            tv.setTextColor(ContextCompat.getColor(context, R.color.rom_text_color))
+            return view
+        }
     }
 
     private data class RomEntry(

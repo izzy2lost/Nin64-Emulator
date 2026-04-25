@@ -7,7 +7,7 @@
     <string name="game_folder_not_set">Not set</string>
     <string name="change_folder">Change Folder</string>
     <string name="navigate_up">Back</string>
-    <string name="no_games_in_folder">No games found.\nAdd .z64 / .n64 / .v64 ROMs to the selected folder.</string>
+    <string name="no_games_in_folder">No games found in this folder.</string>
     <string name="games_header_count">Games (%1$d)</string>
     <string name="folder_pick_cancelled">Folder pick cancelled.</string>
     <string name="invalid_rom_folder">The selected ROM folder is no longer available.</string>

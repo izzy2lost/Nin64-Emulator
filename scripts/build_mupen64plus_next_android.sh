@@ -13,6 +13,11 @@ if [[ ! -d "${CORE_ROOT}" ]]; then
     exit 1
 fi
 
+if [[ -f "${OUTPUT_LIB}" ]]; then
+    echo "Core already built at ${OUTPUT_LIB}, skipping build."
+    exit 0
+fi
+
 if [[ -n "${ANDROID_NDK_HOME:-}" && -x "${ANDROID_NDK_HOME}/ndk-build" ]]; then
     NDK_BUILD="${ANDROID_NDK_HOME}/ndk-build"
 elif [[ -n "${ANDROID_NDK_ROOT:-}" && -x "${ANDROID_NDK_ROOT}/ndk-build" ]]; then
@@ -26,13 +31,6 @@ fi
 
 echo "Using ndk-build at ${NDK_BUILD}"
 echo "Building Mupen64Plus-Next for arm64-v8a with GLES3 enabled..."
-
-"${NDK_BUILD}" \
-    -C "${CORE_ROOT}/libretro/jni" \
-    APP_ABI=arm64-v8a \
-    APP_PLATFORM=android-26 \
-    GLES3=1 \
-    clean
 
 "${NDK_BUILD}" \
     -C "${CORE_ROOT}/libretro/jni" \
