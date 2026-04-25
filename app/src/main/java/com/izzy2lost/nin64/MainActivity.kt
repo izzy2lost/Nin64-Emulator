@@ -25,7 +25,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
-import java.io.FileInputStream
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.util.ArrayDeque
@@ -103,7 +102,6 @@ class MainActivity : AppCompatActivity() {
         romRecyclerView.layoutManager = LinearLayoutManager(this)
         romRecyclerView.adapter = romAdapter
 
-        configPathText.text = File(preferredRootDir(), ULTRA_INI_NAME).absolutePath
         updateRomFolderLabel(readSavedRomFolderUri())
         updateGamesHeader(0)
 
@@ -136,107 +134,12 @@ class MainActivity : AppCompatActivity() {
         loadAvailableRoms()
     }
 
-    private fun ensureConfigReady(): File {
-        val rootDir = preferredRootDir()
-        val target = File(rootDir, ULTRA_INI_NAME)
-
-        if (!rootDir.exists()) {
-            rootDir.mkdirs()
-        }
-
-        val existingBody = when {
-            !target.exists() -> null
-            target.readText().startsWith(LEGACY_ASSET_HEADER) -> null
-            else -> target.readText()
-        }
-        val configBody = buildConfigBody(existingBody, rootDir)
-        val shouldWrite = !target.exists() || target.readText() != configBody
-
-        if (shouldWrite) {
-            target.writeText(configBody)
-        }
-
-        return rootDir
-    }
-
-    private fun buildConfigBody(existingBody: String?, rootDir: File): String {
-        val normalizedRoot = rootDir.absolutePath.replace('\\', '/') + "/"
-        val normalizedRomPath = appRomDirectory().absolutePath.replace('\\', '/') + "/"
-        val baseBody = existingBody ?: assets.open(ULTRA_INI_NAME).bufferedReader().use { reader ->
-            reader.readText()
-        }
-
-        val normalizedBody = baseBody
-            .lineSequence()
-            .map { line ->
-                when {
-                    line.startsWith("savepath=") -> "savepath=$normalizedRoot"
-                    line.startsWith("rompath=") -> "rompath=$normalizedRomPath"
-                    else -> line
-                }
-            }
-            .joinToString("\n")
-
-        return ensureSectionSetting(
-            text = normalizedBody,
-            sectionName = "GOLDENEYE",
-            key = "directsp",
-            value = "0",
-        ).trimEnd() + "\n"
-    }
-
-    private fun ensureSectionSetting(
-        text: String,
-        sectionName: String,
-        key: String,
-        value: String,
-    ): String {
-        val lines = text.lines().toMutableList()
-        val header = "[$sectionName]"
-        var sectionStart = -1
-        var sectionEnd = lines.size
-
-        for (index in lines.indices) {
-            if (lines[index].trim() == header) {
-                sectionStart = index
-                break
-            }
-        }
-
-        if (sectionStart < 0) {
-            return text
-        }
-
-        for (index in sectionStart + 1 until lines.size) {
-            if (lines[index].startsWith("[") && lines[index].endsWith("]")) {
-                sectionEnd = index
-                break
-            }
-        }
-
-        for (index in sectionStart + 1 until sectionEnd) {
-            if (lines[index].startsWith("$key=")) {
-                lines[index] = "$key=$value"
-                return lines.joinToString("\n")
-            }
-        }
-
-        lines.add(sectionEnd, "$key=$value")
-        return lines.joinToString("\n")
-    }
-
     private fun preferredRootDir(): File {
         return getExternalFilesDir(null) ?: filesDir
     }
 
-    private fun appRomDirectory(): File {
-        return File(preferredRootDir(), APP_ROMS_DIR_NAME).apply {
-            mkdirs()
-        }
-    }
-
     private fun bootCacheDirectory(): File {
-        return File(cacheDir, APP_ROMS_DIR_NAME).apply {
+        return File(cacheDir, "roms").apply {
             mkdirs()
         }
     }
@@ -244,20 +147,15 @@ class MainActivity : AppCompatActivity() {
     private fun loadAvailableRoms() {
         val savedFolderUri = readSavedRomFolderUri()
         updateRomFolderLabel(savedFolderUri)
-        statusText.text = getString(R.string.scanning_games)
         clearPreview()
 
         Thread {
             val result = runCatching {
-                val combined = mutableListOf<RomEntry>()
-                combined += scanLocalRomFolder(appRomDirectory())
                 if (savedFolderUri != null) {
-                    combined += scanDocumentRomFolder(savedFolderUri)
+                    scanDocumentRomFolder(savedFolderUri)
+                } else {
+                    emptyList()
                 }
-                combined.sortedWith(
-                    compareBy<RomEntry> { it.displayName.lowercase() }
-                        .thenBy { it.fileName.lowercase() }
-                )
             }
 
             runOnUiThread {
@@ -313,17 +211,6 @@ class MainActivity : AppCompatActivity() {
         return roms
     }
 
-    private fun scanLocalRomFolder(root: File): List<RomEntry> {
-        if (!root.exists()) {
-            return emptyList()
-        }
-
-        return root.walkTopDown()
-            .filter { file -> file.isFile && isRomFile(file.name) }
-            .sortedBy { file -> file.name.lowercase() }
-            .map { file -> file.toRomEntry() }
-            .toList()
-    }
 
     private fun isRomFile(name: String?): Boolean {
         val extension = name
@@ -352,7 +239,7 @@ class MainActivity : AppCompatActivity() {
     private fun File.toRomEntry(): RomEntry {
         val fileName = name
         val fallbackName = fileName.substringBeforeLast('.', fileName)
-        val displayName = FileInputStream(this).use { input ->
+        val displayName = inputStream().use { input ->
             readRomTitle(input, fallbackName)
         }
 
@@ -436,7 +323,7 @@ class MainActivity : AppCompatActivity() {
 
         Thread {
             try {
-                val rootDir = ensureConfigReady()
+                val rootDir = preferredRootDir().also { it.mkdirs() }
                 val romFile = prepareRomForBoot(entry)
                 runOnUiThread {
                     GameActivity.launch(this, rootDir.absolutePath, romFile.absolutePath)
@@ -488,9 +375,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateRomFolderLabel(uri: Uri?) {
-        val localPath = appRomDirectory().absolutePath
         if (uri == null) {
-            romFolderText.text = getString(R.string.rom_sources_local_only, localPath)
+            romFolderText.text = ""
             return
         }
 
@@ -499,12 +385,7 @@ class MainActivity : AppCompatActivity() {
             ?: uri.lastPathSegment
             ?: uri.toString()
 
-        romFolderText.text = getString(
-            R.string.rom_sources_selected,
-            localPath,
-            folderName,
-            uri.toString(),
-        )
+        romFolderText.text = folderName
     }
 
     private fun updateGamesHeader(count: Int) {
@@ -659,9 +540,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val PREFS_NAME = "nin64_prefs"
         private const val PREF_ROM_FOLDER_URI = "rom_folder_uri"
-        private const val ULTRA_INI_NAME = "ultra.ini"
-        private const val LEGACY_ASSET_HEADER = "// UltraHLE initialization file V1.0.0"
-        private const val APP_ROMS_DIR_NAME = "roms"
         private const val EXTRA_BOOT_ROM_PATH = "bootRomPath"
 
         private val ROM_EXTENSIONS = setOf("z64", "n64", "v64", "rom", "bin")

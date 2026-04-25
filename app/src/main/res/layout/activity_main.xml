@@ -58,6 +58,7 @@
                 android:layout_gravity="center"
                 android:paddingStart="32dp"
                 android:paddingEnd="32dp"
+                android:textColor="@android:color/white"
                 android:text="@string/open_games_folder"
                 android:visibility="visible" />
 
