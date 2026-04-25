@@ -1,42 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Nin64</string>
-    <string name="hero_title">Nin64 Android Port</string>
-    <string name="hero_subtitle">The app can scan your own ROM storage, pick a folder, launch a game, and show any framebuffer data the legacy core produces while we bring the renderer back to life.</string>
-    <string name="init_native">Init Native Core</string>
-    <string name="run_smoke_test">Run Smoke Test</string>
-    <string name="pick_games_folder">Pick Games Folder</string>
-    <string name="refresh_games">Refresh Games</string>
-    <string name="config_path_label">Config Path</string>
-    <string name="rom_folder_label">ROM Sources</string>
-    <string name="status_label">Native Status</string>
-    <string name="frame_preview_label">Frame Preview</string>
-    <string name="games_header">Games</string>
+    <string name="open_games_folder">Open Games Folder</string>
+    <string name="settings">Settings</string>
+    <string name="game_folder">Game Folder</string>
+    <string name="game_folder_not_set">Not set</string>
+    <string name="change_folder">Change Folder</string>
+    <string name="navigate_up">Back</string>
+    <string name="no_games_in_folder">No games found.\nAdd .z64 / .n64 / .v64 ROMs to the selected folder.</string>
     <string name="games_header_count">Games (%1$d)</string>
-    <string name="initial_status">This build boots the legacy core in interpreter mode. Tap a game to launch it, and Nin64 will show boot metrics plus any framebuffer image it can recover.</string>
-    <string name="running_task">Running native task…</string>
     <string name="folder_pick_cancelled">Folder pick cancelled.</string>
-    <string name="rom_sources_local_only">App ROM storage:
-%1$s
-
-Picked folder:
-Not set</string>
-    <string name="rom_sources_selected">App ROM storage:
-%1$s
-
-Picked folder:
-%2$s
-%3$s</string>
-    <string name="scanning_games">Scanning for ROMs…</string>
-    <string name="games_found_status">Found %1$d game(s).</string>
-    <string name="no_games_found_status">No ROM files were found yet. Put ROMs in:
-%1$s
-or pick a folder to scan.</string>
-    <string name="no_games_placeholder">Pick a folder, or drop ROMs into the app ROM storage path shown above, to list `.z64`, `.n64`, `.v64`, `.rom`, or `.bin` games.</string>
     <string name="invalid_rom_folder">The selected ROM folder is no longer available.</string>
     <string name="unknown_game_file">Unknown ROM</string>
     <string name="booting_rom_status">Booting %1$s…</string>
     <string name="copy_rom_failed">Could not copy %1$s into the app boot cache.</string>
-    <string name="debug_boot_missing">The requested debug boot ROM path does not exist:
-%1$s</string>
+    <string name="debug_boot_missing">The requested debug boot ROM path does not exist:\n%1$s</string>
+    <string name="scanning_games">Scanning for ROMs…</string>
+    <string name="games_found_status">Found %1$d game(s).</string>
+    <string name="no_games_found_status">No ROM files found.</string>
+    <!-- Compat strings still used in code -->
+    <string name="initial_status">Ready.</string>
+    <string name="running_task">Running…</string>
+    <string name="config_path_label">Config Path</string>
+    <string name="status_label">Status</string>
+    <string name="frame_preview_label">Frame Preview</string>
+    <string name="hero_title">Nin64</string>
+    <string name="hero_subtitle">N64 emulator</string>
+    <string name="rom_folder_label">ROM Sources</string>
+    <string name="pick_games_folder">Pick Games Folder</string>
+    <string name="refresh_games">Refresh</string>
+    <string name="init_native">Init</string>
+    <string name="run_smoke_test">Smoke Test</string>
+    <string name="games_header">Games</string>
+    <string name="rom_sources_local_only">%1$s</string>
+    <string name="rom_sources_selected">%2$s</string>
 </resources>

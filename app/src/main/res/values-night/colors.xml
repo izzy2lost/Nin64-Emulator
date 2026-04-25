@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark mode overrides -->
+    <color name="background">#000000</color>
+    <color name="surface">#121212</color>
+    <color name="on_surface">#FFFFFF</color>
+    <color name="on_surface_muted">#AAAAAA</color>
+
+    <!-- Legacy compat names -->
+    <color name="ink">#FFFFFF</color>
+    <color name="ink_muted">#AAAAAA</color>
+    <color name="panel">#1A1A1A</color>
+</resources>

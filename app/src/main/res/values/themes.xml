@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
     <style name="Theme.Nin64" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="android:statusBarColor">@color/action</item>
-        <item name="android:navigationBarColor">@color/panel</item>
-        <item name="colorPrimary">@color/action</item>
-        <item name="colorSecondary">@color/action_alt</item>
-        <item name="android:windowLightStatusBar" tools:targetApi="23">false</item>
+        <item name="colorPrimary">@color/brand_blue</item>
+        <item name="colorSecondary">@color/brand_green</item>
+        <item name="colorTertiary">@color/brand_red</item>
+        <item name="android:colorBackground">@color/background</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="27">shortEdges</item>
     </style>
 </resources>

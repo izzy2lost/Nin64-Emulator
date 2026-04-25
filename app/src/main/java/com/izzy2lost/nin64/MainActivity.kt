@@ -5,10 +5,12 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.widget.ArrayAdapter
-import android.widget.Button
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.ListView
 import android.widget.TextView
+import androidx.core.content.ContextCompat
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
@@ -25,6 +27,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var gamesHeaderText: TextView
     private lateinit var romListView: ListView
     private lateinit var framePreviewImage: ImageView
+    private lateinit var swipeRefreshLayout: SwipeRefreshLayout
+    private lateinit var pickFolderButton: android.widget.Button
     private lateinit var romAdapter: ArrayAdapter<String>
     private val romEntries = mutableListOf<RomEntry>()
 
@@ -41,6 +45,7 @@ class MainActivity : AppCompatActivity() {
 
             persistRomFolderPermission(uri)
             saveRomFolderUri(uri)
+            updateEmptyState()
             loadAvailableRoms()
         }
 
@@ -54,11 +59,9 @@ class MainActivity : AppCompatActivity() {
         gamesHeaderText = findViewById(R.id.gamesHeaderText)
         romListView = findViewById(R.id.romListView)
         framePreviewImage = findViewById(R.id.framePreviewImage)
+        swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout)
+        pickFolderButton = findViewById(R.id.pickFolderButton)
 
-        val initButton = findViewById<Button>(R.id.initButton)
-        val smokeTestButton = findViewById<Button>(R.id.smokeTestButton)
-        val pickFolderButton = findViewById<Button>(R.id.pickFolderButton)
-        val refreshGamesButton = findViewById<Button>(R.id.refreshGamesButton)
         val emptyRomListText = findViewById<TextView>(R.id.emptyRomListText)
 
         romAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, mutableListOf())
@@ -72,39 +75,33 @@ class MainActivity : AppCompatActivity() {
         updateRomFolderLabel(readSavedRomFolderUri())
         updateGamesHeader(0)
 
-        initButton.setOnClickListener {
-            initializeNativeCore()
-        }
-
-        smokeTestButton.setOnClickListener {
-            runNativeTask {
-                val rootDir = ensureConfigReady()
-                val initResult = NativeBridge.init(rootDir.absolutePath)
-                val smokeResult = NativeBridge.smokeTest()
-                "$initResult\nultra.ini=${File(rootDir, ULTRA_INI_NAME).absolutePath}\n\n$smokeResult"
-            }
-        }
+        swipeRefreshLayout.setColorSchemeColors(
+            ContextCompat.getColor(this, R.color.brand_blue),
+            ContextCompat.getColor(this, R.color.brand_yellow),
+            ContextCompat.getColor(this, R.color.brand_green),
+            ContextCompat.getColor(this, R.color.brand_red),
+        )
+        swipeRefreshLayout.setOnRefreshListener { loadAvailableRoms() }
 
         pickFolderButton.setOnClickListener {
             folderPicker.launch(readSavedRomFolderUri())
         }
 
-        refreshGamesButton.setOnClickListener {
-            loadAvailableRoms()
+        findViewById<ImageButton>(R.id.settingsButton).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
         }
+
+        updateEmptyState()
 
         if (intent.getStringExtra(EXTRA_BOOT_ROM_PATH) != null) {
             handleBootIntent()
-        } else {
-            loadAvailableRoms()
         }
     }
 
-    private fun initializeNativeCore() {
-        runNativeTask {
-            val rootDir = ensureConfigReady()
-            "${NativeBridge.init(rootDir.absolutePath)}\nultra.ini=${File(rootDir, ULTRA_INI_NAME).absolutePath}"
-        }
+    override fun onResume() {
+        super.onResume()
+        updateEmptyState()
+        loadAvailableRoms()
     }
 
     private fun ensureConfigReady(): File {
@@ -250,8 +247,17 @@ class MainActivity : AppCompatActivity() {
                     updateGamesHeader(0)
                     statusText.text = error.stackTraceToString()
                 }
+                swipeRefreshLayout.isRefreshing = false
+                updateEmptyState()
             }
         }.start()
+    }
+
+    private fun updateEmptyState() {
+        val hasFolderConfigured = readSavedRomFolderUri() != null
+        pickFolderButton.visibility = if (hasFolderConfigured) android.view.View.GONE else android.view.View.VISIBLE
+        romListView.visibility = if (hasFolderConfigured) android.view.View.VISIBLE else android.view.View.GONE
+        swipeRefreshLayout.isEnabled = hasFolderConfigured
     }
 
     private fun scanDocumentRomFolder(uri: Uri): List<RomEntry> {
@@ -474,21 +480,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateGamesHeader(count: Int) {
         gamesHeaderText.text = getString(R.string.games_header_count, count)
-    }
-
-    private fun runNativeTask(task: () -> String) {
-        statusText.text = getString(R.string.running_task)
-        Thread {
-            val result = try {
-                task()
-            } catch (t: Throwable) {
-                t.stackTraceToString()
-            }
-
-            runOnUiThread {
-                statusText.text = result
-            }
-        }.start()
     }
 
     private fun handleBootIntent() {

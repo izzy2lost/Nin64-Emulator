@@ -1,9 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="surface">#F2EBD9</color>
-    <color name="panel">#FFF8EA</color>
-    <color name="ink">#1D221C</color>
-    <color name="ink_muted">#596154</color>
-    <color name="action">#275D4C</color>
-    <color name="action_alt">#D8B34D</color>
+    <!-- Brand colors extracted from app icon -->
+    <color name="brand_blue">#4285F4</color>
+    <color name="brand_yellow">#FBBC05</color>
+    <color name="brand_green">#34A853</color>
+    <color name="brand_red">#EA4335</color>
+
+    <!-- Light mode -->
+    <color name="background">#FFFFFF</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="on_surface">#212121</color>
+    <color name="on_surface_muted">#757575</color>
+
+    <!-- Legacy compat names still referenced in layouts/code -->
+    <color name="action">#4285F4</color>
+    <color name="action_alt">#FBBC05</color>
+    <color name="ink">#212121</color>
+    <color name="ink_muted">#757575</color>
+    <color name="panel">#F5F5F5</color>
 </resources>
