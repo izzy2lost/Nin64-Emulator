@@ -3,8 +3,6 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val nin64CoreBackend = (project.findProperty("nin64CoreBackend") as String?) ?: "libretro"
-
 android {
     namespace = "com.izzy2lost.nin64"
     compileSdk = 36
@@ -25,7 +23,7 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += ""
-                arguments += listOf("-DNIN64_CORE_BACKEND=$nin64CoreBackend", "-DANDROID_STL=c++_shared")
+                arguments += listOf("-DANDROID_STL=c++_shared")
             }
         }
     }
@@ -76,10 +74,8 @@ tasks.register<Exec>("buildMupen64PlusNextArm64") {
     commandLine("bash", "${rootDir}/scripts/build_mupen64plus_next_android.sh")
 }
 
-if (nin64CoreBackend == "libretro") {
-    tasks.named("preBuild") {
-        dependsOn("buildMupen64PlusNextArm64")
-    }
+tasks.named("preBuild") {
+    dependsOn("buildMupen64PlusNextArm64")
 }
 
 dependencies {
