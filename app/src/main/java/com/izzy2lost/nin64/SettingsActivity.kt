@@ -1,22 +1,28 @@
 package com.izzy2lost.nin64
 
-import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.provider.DocumentsContract
+import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import android.widget.ImageButton
+import android.widget.Spinner
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import com.google.android.material.button.MaterialButton
-import android.widget.ImageButton
-import android.widget.TextView
 
 class SettingsActivity : AppCompatActivity() {
 
     private companion object {
         const val PREFS_NAME = "nin64_prefs"
         const val PREF_ROM_FOLDER_URI = "rom_folder_uri"
+        const val PREF_ASPECT = "mupen64plus-aspect"
+        const val PREF_RES_FACTOR = "mupen64plus-EnableNativeResFactor"
+        const val DEFAULT_ASPECT = "4:3"
+        const val DEFAULT_RES_FACTOR = "0"
     }
 
     private val prefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
@@ -49,6 +55,21 @@ class SettingsActivity : AppCompatActivity() {
             folderPicker.launch(current)
         }
 
+        bindSpinner(
+            spinnerId = R.id.aspectSpinner,
+            labelsRes = R.array.aspect_labels,
+            valuesRes = R.array.aspect_values,
+            prefKey = PREF_ASPECT,
+            defaultValue = DEFAULT_ASPECT
+        )
+        bindSpinner(
+            spinnerId = R.id.resolutionSpinner,
+            labelsRes = R.array.resolution_labels,
+            valuesRes = R.array.resolution_values,
+            prefKey = PREF_RES_FACTOR,
+            defaultValue = DEFAULT_RES_FACTOR
+        )
+
         updateFolderDisplay()
     }
 
@@ -63,6 +84,33 @@ class SettingsActivity : AppCompatActivity() {
             DocumentFile.fromTreeUri(this, uri)?.name ?: uri.lastPathSegment ?: getString(R.string.game_folder_not_set)
         } else {
             getString(R.string.game_folder_not_set)
+        }
+    }
+
+    private fun bindSpinner(
+        spinnerId: Int,
+        labelsRes: Int,
+        valuesRes: Int,
+        prefKey: String,
+        defaultValue: String
+    ) {
+        val spinner = findViewById<Spinner>(spinnerId)
+        val labels = resources.getStringArray(labelsRes)
+        val values = resources.getStringArray(valuesRes)
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, labels)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spinner.adapter = adapter
+
+        val current = prefs.getString(prefKey, defaultValue) ?: defaultValue
+        val index = values.indexOf(current).let { if (it < 0) values.indexOf(defaultValue).coerceAtLeast(0) else it }
+        spinner.setSelection(index, false)
+
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                prefs.edit().putString(prefKey, values[position]).apply()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
     }
 }

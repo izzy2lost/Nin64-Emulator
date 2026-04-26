@@ -111,6 +111,9 @@ typedef struct LibretroBridge {
     BridgeOption *registered_options;
     size_t registered_option_count;
     size_t registered_option_capacity;
+    BridgeOption *user_options;
+    size_t user_option_count;
+    size_t user_option_capacity;
     EGLDisplay egl_display;
     EGLConfig egl_config;
     EGLContext egl_context;
@@ -165,6 +168,8 @@ static bool bridge_environment(unsigned cmd, void *data);
 static const char *bridge_find_option_value(const char *key);
 static const char *bridge_find_surface_option_value(const char *key);
 static const char *bridge_find_registered_option_value(const char *key);
+static const char *bridge_find_user_option_value(const char *key);
+static int bridge_set_user_option(const char *key, const char *value);
 static char *bridge_strdup(const char *src);
 static uintptr_t bridge_get_current_framebuffer(void);
 static retro_proc_address_t bridge_get_proc_address(const char *sym);
@@ -264,11 +269,19 @@ static void bridge_log(enum retro_log_level level, const char *fmt, ...)
 static const char *bridge_find_option_value(const char *key)
 {
     const BridgeOption *option = g_default_options;
+    const char *user_value;
     const char *surface_value;
     const char *registered_value;
 
     if (!key) {
         return NULL;
+    }
+
+    /* User-set options have highest priority so they can override
+     * surface-derived screensize values and the hardcoded defaults. */
+    user_value = bridge_find_user_option_value(key);
+    if (user_value) {
+        return user_value;
     }
 
     surface_value = bridge_find_surface_option_value(key);
@@ -320,6 +333,77 @@ static const char *bridge_find_registered_option_value(const char *key)
     }
 
     return NULL;
+}
+
+static const char *bridge_find_user_option_value(const char *key)
+{
+    size_t i;
+
+    if (!key) {
+        return NULL;
+    }
+
+    for (i = 0; i < g_bridge.user_option_count; i++) {
+        BridgeOption *option = &g_bridge.user_options[i];
+        if (option->key && strcmp(option->key, key) == 0) {
+            return option->value;
+        }
+    }
+
+    return NULL;
+}
+
+static int bridge_set_user_option(const char *key, const char *value)
+{
+    BridgeOption *option;
+    char *key_copy;
+    char *value_copy;
+    size_t i;
+
+    if (!key || !key[0] || !value || !value[0]) {
+        return 1;
+    }
+
+    for (i = 0; i < g_bridge.user_option_count; i++) {
+        option = &g_bridge.user_options[i];
+        if (option->key && strcmp(option->key, key) == 0) {
+            value_copy = bridge_strdup(value);
+            if (!value_copy) {
+                return 0;
+            }
+            free(option->value);
+            option->value = value_copy;
+            return 1;
+        }
+    }
+
+    if (g_bridge.user_option_count == g_bridge.user_option_capacity) {
+        size_t new_capacity = g_bridge.user_option_capacity == 0 ? 8u : g_bridge.user_option_capacity * 2u;
+        BridgeOption *new_options = (BridgeOption *)realloc(
+            g_bridge.user_options,
+            new_capacity * sizeof(BridgeOption));
+        if (!new_options) {
+            return 0;
+        }
+
+        memset(new_options + g_bridge.user_option_capacity, 0,
+            (new_capacity - g_bridge.user_option_capacity) * sizeof(BridgeOption));
+        g_bridge.user_options = new_options;
+        g_bridge.user_option_capacity = new_capacity;
+    }
+
+    key_copy = bridge_strdup(key);
+    value_copy = bridge_strdup(value);
+    if (!key_copy || !value_copy) {
+        free(key_copy);
+        free(value_copy);
+        return 0;
+    }
+
+    option = &g_bridge.user_options[g_bridge.user_option_count++];
+    option->key = key_copy;
+    option->value = value_copy;
+    return 1;
 }
 
 static char *bridge_strdup(const char *src)
@@ -1973,6 +2057,29 @@ Java_com_izzy2lost_nin64_NativeBridge_shutdownSession(JNIEnv *env, jobject thiz)
     (void)thiz;
     bridge_log(RETRO_LOG_INFO, "shutdownSession");
     bridge_shutdown();
+}
+
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_setOption(JNIEnv *env, jobject thiz, jstring key, jstring value)
+{
+    const char *key_utf;
+    const char *value_utf;
+
+    (void)thiz;
+
+    if (!key || !value) {
+        return;
+    }
+
+    key_utf = (*env)->GetStringUTFChars(env, key, NULL);
+    value_utf = (*env)->GetStringUTFChars(env, value, NULL);
+
+    if (key_utf && value_utf) {
+        bridge_set_user_option(key_utf, value_utf);
+    }
+
+    if (key_utf) (*env)->ReleaseStringUTFChars(env, key, key_utf);
+    if (value_utf) (*env)->ReleaseStringUTFChars(env, value, value_utf);
 }
 
 JNIEXPORT jint JNICALL

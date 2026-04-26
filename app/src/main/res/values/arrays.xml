@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- mupen64plus-aspect: shown labels -->
+    <string-array name="aspect_labels">
+        <item>4:3 (original)</item>
+        <item>16:9 (stretched)</item>
+        <item>16:9 (adjusted)</item>
+    </string-array>
+    <!-- mupen64plus-aspect: values passed to the core -->
+    <string-array name="aspect_values">
+        <item>4:3</item>
+        <item>16:9</item>
+        <item>16:9 adjusted</item>
+    </string-array>
+
+    <!-- mupen64plus-EnableNativeResFactor: shown labels -->
+    <string-array name="resolution_labels">
+        <item>Auto (match screen)</item>
+        <item>Native (1x)</item>
+        <item>2x</item>
+        <item>3x</item>
+        <item>4x</item>
+        <item>6x</item>
+        <item>8x</item>
+    </string-array>
+    <!-- mupen64plus-EnableNativeResFactor: values passed to the core -->
+    <string-array name="resolution_values">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+        <item>4</item>
+        <item>6</item>
+        <item>8</item>
+    </string-array>
+
+</resources>

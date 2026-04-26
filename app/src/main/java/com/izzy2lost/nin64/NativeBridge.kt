@@ -22,4 +22,5 @@ object NativeBridge {
     external fun setSurface(surface: Surface?, width: Int, height: Int)
     external fun clearSurface()
     external fun shutdownSession()
+    external fun setOption(key: String, value: String)
 }

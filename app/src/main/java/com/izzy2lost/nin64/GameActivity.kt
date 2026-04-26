@@ -76,7 +76,28 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         }
         Log.i(logTag, "surfaceCreated ${holder.surfaceFrame.width()}x${holder.surfaceFrame.height()} rom=$romPath")
         NativeBridge.setSurface(holder.surface, holder.surfaceFrame.width(), holder.surfaceFrame.height())
+        applyEmulatorSettings(holder.surfaceFrame.height())
         startEmulation()
+    }
+
+    private fun applyEmulatorSettings(surfaceHeight: Int) {
+        val prefs = getSharedPreferences("nin64_prefs", MODE_PRIVATE)
+        prefs.getString("mupen64plus-aspect", null)?.let {
+            NativeBridge.setOption("mupen64plus-aspect", it)
+        }
+
+        // For "Auto" (or unset) we pick the Nx native-resolution multiplier closest
+        // to the device's surface height. N64 native is 320x240, and GlideN64 only
+        // honours integer factors 1..8 — handing it an arbitrary WxH string causes
+        // games like Conker to render wrong on first boot.
+        val resPref = prefs.getString("mupen64plus-EnableNativeResFactor", null)
+        val factor = if (resPref.isNullOrEmpty() || resPref == "0") {
+            ((surfaceHeight + 120) / 240).coerceIn(1, 8)
+        } else {
+            resPref.toIntOrNull()?.coerceIn(1, 8) ?: 1
+        }
+        NativeBridge.setOption("mupen64plus-EnableNativeResFactor", factor.toString())
+        Log.i(logTag, "applyEmulatorSettings surfaceHeight=$surfaceHeight resFactor=$factor")
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {

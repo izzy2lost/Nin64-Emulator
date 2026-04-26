@@ -18,6 +18,10 @@
     <string name="scanning_games">Scanning for ROMs…</string>
     <string name="games_found_status">Found %1$d game(s).</string>
     <string name="no_games_found_status">No ROM files found.</string>
+    <!-- Settings: video -->
+    <string name="settings_display_header">Display</string>
+    <string name="settings_aspect_label">Aspect Ratio</string>
+    <string name="settings_resolution_label">Internal Resolution</string>
     <!-- Compat strings still used in code -->
     <string name="initial_status">Ready.</string>
     <string name="running_task">Running…</string>
