@@ -39,10 +39,11 @@ target_compile_definitions(
 target_compile_options(
     nin64_core
     PRIVATE
-    -O2
     -Wall
     -Wextra
     -Wno-unused-parameter
+    $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>:-O3>
+    $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>:-DNDEBUG>
 )
 
 target_link_libraries(

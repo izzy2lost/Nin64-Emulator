@@ -7,13 +7,14 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CORE_ROOT="${REPO_ROOT}/third_party/mupen64plus-libretro-nx"
 APP_JNI_LIBS_DIR="${REPO_ROOT}/app/src/main/jniLibs/arm64-v8a"
 OUTPUT_LIB="${APP_JNI_LIBS_DIR}/libmupen64plus_next_libretro.so"
+FORCE_REBUILD="${NIN64_FORCE_CORE_REBUILD:-0}"
 
 if [[ ! -d "${CORE_ROOT}" ]]; then
     echo "Vendored core not found at ${CORE_ROOT}" >&2
     exit 1
 fi
 
-if [[ -f "${OUTPUT_LIB}" ]]; then
+if [[ -f "${OUTPUT_LIB}" && "${FORCE_REBUILD}" != "1" ]]; then
     echo "Core already built at ${OUTPUT_LIB}, skipping build."
     exit 0
 fi
@@ -32,10 +33,24 @@ fi
 echo "Using ndk-build at ${NDK_BUILD}"
 echo "Building Mupen64Plus-Next for arm64-v8a with GLES3 enabled..."
 
+if [[ "${FORCE_REBUILD}" == "1" ]]; then
+    echo "Cleaning existing Mupen64Plus-Next objects for an optimized rebuild..."
+    "${NDK_BUILD}" \
+        -C "${CORE_ROOT}/libretro/jni" \
+        APP_ABI=arm64-v8a \
+        APP_PLATFORM=android-26 \
+        APP_OPTIM=release \
+        NDK_DEBUG=0 \
+        GLES3=1 \
+        clean
+fi
+
 "${NDK_BUILD}" \
     -C "${CORE_ROOT}/libretro/jni" \
     APP_ABI=arm64-v8a \
     APP_PLATFORM=android-26 \
+    APP_OPTIM=release \
+    NDK_DEBUG=0 \
     GLES3=1 \
     -j"$(nproc)"
 
