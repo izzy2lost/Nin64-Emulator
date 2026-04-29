@@ -6,11 +6,13 @@
     android:layout_height="wrap_content"
     android:layout_marginStart="16dp"
     android:layout_marginEnd="16dp"
-    android:layout_marginTop="4dp"
-    android:layout_marginBottom="4dp"
-    app:cardCornerRadius="16dp"
-    app:cardElevation="2dp"
-    app:strokeWidth="0dp">
+    android:layout_marginTop="6dp"
+    android:layout_marginBottom="6dp"
+    app:cardCornerRadius="14dp"
+    app:cardElevation="0dp"
+    app:cardBackgroundColor="@android:color/transparent"
+    app:strokeWidth="1.5dp"
+    app:strokeColor="@color/brand_blue">
 
     <TextView
         android:id="@+id/romTitle"
@@ -22,7 +24,7 @@
         android:paddingBottom="14dp"
         android:textSize="15sp"
         android:textStyle="bold"
-        android:textColor="@color/rom_text_color"
+        android:textColor="?attr/colorOnSurface"
         android:singleLine="true"
         android:ellipsize="end" />
 

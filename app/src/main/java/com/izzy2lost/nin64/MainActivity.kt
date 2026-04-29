@@ -798,7 +798,7 @@ class MainActivity : AppCompatActivity() {
         path.replace('\\', '/').substringAfterLast('/')
 
     private inner class ListAdapter : RecyclerView.Adapter<ListAdapter.ViewHolder>() {
-        private val bgColors = intArrayOf(
+        private val strokeColors = intArrayOf(
             Color.parseColor("#0056EA"),
             Color.parseColor("#FEDF5A"),
             Color.parseColor("#00C063"),
@@ -820,8 +820,7 @@ class MainActivity : AppCompatActivity() {
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             val entry = romEntries[position]
             holder.text.text = entry.listLabel()
-            holder.card.setCardBackgroundColor(bgColors[position % 4])
-            holder.text.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.rom_text_color))
+            holder.card.strokeColor = strokeColors[position % 4]
             holder.itemView.setOnClickListener {
                 val pos = holder.bindingAdapterPosition
                 if (pos != RecyclerView.NO_POSITION) {

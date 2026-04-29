@@ -66,6 +66,7 @@
     <string name="controls_controller_analog_summary">X: %1$s  Y: %2$s</string>
     <string name="controls_global_reset_done">Controls reset to defaults.</string>
     <string name="controls_per_game_reset_done">Per-game controls reset.</string>
+    <string name="hint_long_press_game">Long press a game for per-game settings</string>
     <string name="controls_capture_button">Press a button…</string>
     <string name="controls_capture_stick">Move a stick…</string>
     <string name="done">Done</string>
