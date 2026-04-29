@@ -28,8 +28,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
-import java.io.InputStream
-import java.nio.charset.StandardCharsets
 import java.util.ArrayDeque
 
 class MainActivity : AppCompatActivity() {
@@ -108,7 +106,12 @@ class MainActivity : AppCompatActivity() {
         listAdapter = ListAdapter()
         gridAdapter = GridAdapter()
 
-        CoverMatcher.init(this, "$COVER_BASE_URL/index.txt")
+        RomDatabase.init(this, File(preferredRootDir(), "Mupen64plus/mupen64plus.ini"))
+        CoverMatcher.init(this, "$COVER_BASE_URL/index.txt") {
+            runOnUiThread {
+                romRecyclerView.adapter?.notifyDataSetChanged()
+            }
+        }
 
         viewMode = prefs.getString(PREF_VIEW_MODE, VIEW_MODE_LIST) ?: VIEW_MODE_LIST
         applyViewMode()
@@ -235,14 +238,17 @@ class MainActivity : AppCompatActivity() {
     private fun DocumentFile.toRomEntry(): RomEntry {
         val fileName = name ?: getString(R.string.unknown_game_file)
         val fallbackName = fileName.substringBeforeLast('.', fileName)
-        val displayName = contentResolver.openInputStream(uri)?.use { input ->
-            readRomTitle(input, fallbackName)
-        } ?: fallbackName
+        val identity = contentResolver.openInputStream(uri)?.use { input ->
+            RomIdentityReader.read(input, fallbackName)
+        }
+        val databaseName = identity?.let(RomDatabase::goodNameFor)
+        val displayName = databaseName ?: identity?.headerTitle ?: fallbackName
 
         return RomEntry(
             displayName = displayName,
             fileName = fileName,
             fallbackName = fallbackName,
+            databaseName = databaseName,
             documentUri = uri,
         )
     }
@@ -250,83 +256,19 @@ class MainActivity : AppCompatActivity() {
     private fun File.toRomEntry(): RomEntry {
         val fileName = name
         val fallbackName = fileName.substringBeforeLast('.', fileName)
-        val displayName = inputStream().use { input ->
-            readRomTitle(input, fallbackName)
+        val identity = inputStream().use { input ->
+            RomIdentityReader.read(input, fallbackName)
         }
+        val databaseName = RomDatabase.goodNameFor(identity)
+        val displayName = databaseName ?: identity.headerTitle
 
         return RomEntry(
             displayName = displayName,
             fileName = fileName,
             fallbackName = fallbackName,
+            databaseName = databaseName,
             localFile = this,
         )
-    }
-
-    private fun readRomTitle(input: InputStream, fallbackName: String): String {
-        val header = readHeaderBytes(input)
-
-        if (header.size < 0x34) {
-            return fallbackName
-        }
-
-        val normalized = normalizeRomHeader(header)
-        val rawTitle = normalized
-            .copyOfRange(0x20, 0x34)
-            .toString(StandardCharsets.US_ASCII)
-            .replace(Regex("\\s+"), " ")
-            .trim { it <= ' ' || it == '\u0000' }
-
-        return rawTitle.ifBlank { fallbackName }
-    }
-
-    private fun readHeaderBytes(input: InputStream): ByteArray {
-        val header = ByteArray(0x40)
-        var offset = 0
-
-        while (offset < header.size) {
-            val read = input.read(header, offset, header.size - offset)
-            if (read <= 0) {
-                break
-            }
-            offset += read
-        }
-
-        return header.copyOf(offset)
-    }
-
-    private fun normalizeRomHeader(header: ByteArray): ByteArray {
-        val normalized = header.copyOf()
-        if (normalized.size < 4) {
-            return normalized
-        }
-
-        val b0 = normalized[0]
-        val b1 = normalized[1]
-        val b2 = normalized[2]
-        val b3 = normalized[3]
-
-        if (b0 == 0x37.toByte() && b1 == 0x80.toByte() &&
-            b2 == 0x40.toByte() && b3 == 0x12.toByte()
-        ) {
-            for (index in 0 until normalized.size - 1 step 2) {
-                val tmp = normalized[index]
-                normalized[index] = normalized[index + 1]
-                normalized[index + 1] = tmp
-            }
-        } else if (b0 == 0x40.toByte() && b1 == 0x12.toByte() &&
-            b2 == 0x37.toByte() && b3 == 0x80.toByte()
-        ) {
-            for (index in 0 until normalized.size - 3 step 4) {
-                val tmp0 = normalized[index]
-                val tmp1 = normalized[index + 1]
-                normalized[index] = normalized[index + 3]
-                normalized[index + 1] = normalized[index + 2]
-                normalized[index + 2] = tmp1
-                normalized[index + 3] = tmp0
-            }
-        }
-
-        return normalized
     }
 
     private fun bootSelectedRom(entry: RomEntry) {
@@ -583,7 +525,7 @@ class MainActivity : AppCompatActivity() {
             holder.fallback.text = entry.displayName
 
             val stem = entry.fileName.substringBeforeLast('.', entry.fileName)
-            val coverFile = CoverMatcher.resolve(entry.fileName) ?: "$stem.png"
+            val coverFile = CoverMatcher.resolve(entry.coverCandidates()) ?: "$stem.png"
             val url = "$COVER_BASE_URL/${Uri.encode(coverFile)}"
 
             holder.fallback.visibility = View.VISIBLE
@@ -612,9 +554,13 @@ class MainActivity : AppCompatActivity() {
         val displayName: String,
         val fileName: String,
         val fallbackName: String,
+        val databaseName: String? = null,
         val localFile: File? = null,
         val documentUri: Uri? = null,
     ) {
+        fun coverCandidates(): List<String> =
+            listOfNotNull(databaseName, displayName, fileName, fallbackName).distinct()
+
         fun listLabel(): String {
             return if (displayName.equals(fallbackName, ignoreCase = true)) {
                 displayName

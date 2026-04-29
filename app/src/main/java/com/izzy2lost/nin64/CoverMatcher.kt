@@ -21,7 +21,7 @@ internal object CoverMatcher {
     @Volatile private var normToFile: Map<String, String> = emptyMap()
     @Volatile private var ready = false
 
-    fun init(context: Context, indexUrl: String) {
+    fun init(context: Context, indexUrl: String, onReady: (() -> Unit)? = null) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val cached = prefs.getString(KEY_DATA, null)
         val age = System.currentTimeMillis() - prefs.getLong(KEY_TS, 0)
@@ -29,6 +29,7 @@ internal object CoverMatcher {
         if (cached != null) {
             normToFile = buildIndex(cached)
             ready = true
+            onReady?.invoke()
         }
 
         if (cached == null || age > TTL_MS) {
@@ -42,6 +43,7 @@ internal object CoverMatcher {
                             .apply()
                         normToFile = buildIndex(text)
                         ready = true
+                        onReady?.invoke()
                     }
                 } catch (_: Exception) {
                 }
@@ -51,22 +53,37 @@ internal object CoverMatcher {
 
     /** Best-matching cover filename for the ROM, or null if none. */
     fun resolve(romFileName: String): String? {
+        return resolve(listOf(romFileName))
+    }
+
+    /** Best-matching cover filename for any known ROM name, or null if none. */
+    fun resolve(names: Iterable<String?>): String? {
         if (!ready) return null
-        val normRom = normalize(romFileName.substringBeforeLast('.'))
-        if (normRom.isEmpty()) return null
+        val normNames = names
+            .mapNotNull { name -> name?.let(::stripKnownExtension)?.let(::normalize) }
+            .filter { it.isNotEmpty() }
+            .distinct()
+        if (normNames.isEmpty()) return null
 
-        normToFile[normRom]?.let { return it }
-
-        val prefixHits = normToFile.entries.filter { (k, _) ->
-            k.startsWith(normRom) || normRom.startsWith(k)
-        }
-        if (prefixHits.isNotEmpty()) {
-            return prefixHits.minBy { (k, _) -> kotlin.math.abs(k.length - normRom.length) }.value
+        for (normRom in normNames) {
+            normToFile[normRom]?.let { return it }
         }
 
-        return normToFile.entries
-            .map { (k, v) -> v to similarity(normRom, k) }
-            .filter { (_, s) -> s >= 0.75f }
+        for (normRom in normNames) {
+            val prefixHits = normToFile.entries.filter { (k, _) ->
+                k.startsWith(normRom) || normRom.startsWith(k)
+            }
+            if (prefixHits.isNotEmpty()) {
+                return prefixHits.minBy { (k, _) -> kotlin.math.abs(k.length - normRom.length) }.value
+            }
+        }
+
+        return normNames
+            .asSequence()
+            .flatMap { normRom ->
+                normToFile.entries.asSequence().map { (k, v) -> v to similarity(normRom, k) }
+            }
+            .filter { (_, score) -> score >= 0.75f }
             .maxByOrNull { (_, s) -> s }
             ?.first
     }
@@ -74,7 +91,16 @@ internal object CoverMatcher {
     private fun buildIndex(text: String): Map<String, String> =
         text.lines()
             .filter { it.endsWith(".png") }
-            .associateBy { normalize(it.substringBeforeLast('.')) }
+            .associateBy { normalize(stripKnownExtension(it)) }
+
+    private fun stripKnownExtension(name: String): String {
+        val extension = name.substringAfterLast('.', missingDelimiterValue = "")
+        return if (extension.lowercase() in KNOWN_EXTENSIONS) {
+            name.substringBeforeLast('.')
+        } else {
+            name
+        }
+    }
 
     private fun normalize(name: String): String =
         name
@@ -96,4 +122,6 @@ internal object CoverMatcher {
         }
         return 2f * common / (a.length + b.length)
     }
+
+    private val KNOWN_EXTENSIONS = setOf("z64", "n64", "v64", "rom", "bin", "png")
 }

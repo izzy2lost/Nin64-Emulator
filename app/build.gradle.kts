@@ -50,6 +50,7 @@ android {
     sourceSets {
         getByName("main") {
             jniLibs.srcDir("src/main/jniLibs")
+            assets.srcDir("${rootDir}/third_party/mupen64plus-libretro-nx/mupen64plus-core/data")
         }
     }
 
