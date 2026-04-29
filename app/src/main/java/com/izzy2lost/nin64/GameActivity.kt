@@ -482,7 +482,6 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         val isNight  = isNightMode()
         val panelBg  = if (isNight) Color.parseColor("#1E1F28") else Color.parseColor("#F2F2F7")
         val onSurf   = if (isNight) Color.WHITE else Color.parseColor("#212121")
-        val muted    = if (isNight) Color.parseColor("#AAAAAA") else Color.parseColor("#757575")
         val blue     = Color.parseColor("#0056EA")
         val green    = Color.parseColor("#00C063")
         val red      = Color.parseColor("#D93131")
@@ -505,7 +504,6 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         val wc = LinearLayout.LayoutParams.WRAP_CONTENT
         fun mwp() = LinearLayout.LayoutParams(mp, wc)
 
-        // Title
         panel.addView(TextView(this).apply {
             text = getString(R.string.in_game_menu)
             setTextColor(onSurf)
@@ -514,89 +512,28 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
             gravity = Gravity.CENTER
         }, mwp().apply { bottomMargin = 10.dp })
 
-        // Thumbnail
-        val thumbnail = ImageView(this).apply {
-            setBackgroundColor(Color.rgb(22, 23, 30))
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            adjustViewBounds = false
-        }
-        panel.addView(thumbnail, LinearLayout.LayoutParams(180.dp, 112.dp).apply {
-            gravity = Gravity.CENTER_HORIZONTAL
-            bottomMargin = 6.dp
-        })
-
-        // Status
-        val statusText = TextView(this).apply {
-            setTextColor(muted)
-            textSize = 13f
-            gravity = Gravity.CENTER
-        }
-        panel.addView(statusText, mwp().apply { bottomMargin = 2.dp })
-
-        // Slot label
-        val slotText = TextView(this).apply {
-            setTextColor(onSurf)
-            textSize = 14f
-            gravity = Gravity.CENTER
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }
-
-        val loadBtn = coloredMenuButton(getString(R.string.in_game_load_state), green) {
-            loadStateFromMenu(statusText)
-        }
-
-        fun refreshSlot() {
-            slotText.text = slotLabel(currentSlot)
-            statusText.text = stateStatusText(currentSlot)
-            refreshThumbnail(thumbnail, loadBtn)
-        }
-
-        // Slot selector row
-        val slotRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        slotRow.addView(
-            slotNavButton("‹", onSurf) { if (currentSlot > 1) { currentSlot--; refreshSlot() } },
-            LinearLayout.LayoutParams(44.dp, 44.dp)
-        )
-        slotRow.addView(slotText, LinearLayout.LayoutParams(0, wc, 1f))
-        slotRow.addView(
-            slotNavButton("›", onSurf) { if (currentSlot < SAVE_SLOT_COUNT) { currentSlot++; refreshSlot() } },
-            LinearLayout.LayoutParams(44.dp, 44.dp)
-        )
-        panel.addView(slotRow, mwp().apply { topMargin = 4.dp; bottomMargin = 4.dp })
-
-        // Action buttons
         panel.addView(coloredMenuButton(getString(R.string.in_game_resume), blue) { resumeGame() })
         panel.addView(coloredMenuButton(getString(R.string.in_game_save_state), green) {
-            saveStateFromMenu(statusText, thumbnail, loadBtn)
+            showSlotPickerDialog(isSave = true)
         })
-        panel.addView(loadBtn)
+        panel.addView(coloredMenuButton(getString(R.string.in_game_load_state), green) {
+            showSlotPickerDialog(isSave = false)
+        })
         panel.addView(coloredMenuButton(getString(R.string.in_game_quit), red) { finish() })
 
-        thumbnail.setOnClickListener {
-            if (stateThumbnailFile(currentSlot).isFile) showExpandedThumbnail(stateThumbnailFile(currentSlot))
-        }
-
+        val screenWidth = rootContainer.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+        val menuWidth = (screenWidth - 32.dp).coerceAtMost(400.dp)
         val maxMenuHeight = ((rootContainer.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels) - 48.dp)
             .coerceAtLeast(260.dp)
         val scrollContainer = ScrollView(this).apply {
             isFillViewport = false
             isVerticalScrollBarEnabled = true
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-            addView(
-                panel,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT
-                )
-            )
+            addView(panel, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
         }
-        overlay.addView(scrollContainer, FrameLayout.LayoutParams(300.dp, maxMenuHeight, Gravity.CENTER))
+        overlay.addView(scrollContainer, FrameLayout.LayoutParams(menuWidth, maxMenuHeight, Gravity.CENTER))
         menuOverlay = overlay
         rootContainer.addView(overlay, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        refreshSlot()
     }
 
     private fun resumeGame() {
@@ -607,8 +544,8 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         selectComboPressed = false
     }
 
-    private fun saveStateFromMenu(statusText: TextView, thumbnail: ImageView, loadButton: MaterialButton) {
-        val slot = currentSlot
+    private fun saveStateFromMenu(slot: Int, statusText: TextView, onRefresh: (thumbFile: File, hasState: Boolean) -> Unit) {
+        currentSlot = slot
         val stateFile = stateFile(slot)
         stateFile.parentFile?.mkdirs()
         statusText.text = getString(R.string.in_game_saving_state)
@@ -618,7 +555,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
                 if (result == "saved") {
                     captureStateThumbnail(stateThumbnailFile(slot)) { saved ->
                         statusText.text = if (saved) getString(R.string.in_game_state_saved) else getString(R.string.in_game_state_saved_no_thumbnail)
-                        refreshThumbnail(thumbnail, loadButton)
+                        onRefresh(stateThumbnailFile(slot), stateFile.isFile)
                     }
                 } else {
                     statusText.text = result
@@ -628,8 +565,9 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         }
     }
 
-    private fun loadStateFromMenu(statusText: TextView) {
-        val stateFile = stateFile(currentSlot)
+    private fun loadStateFromMenu(slot: Int, statusText: TextView, onSuccess: (() -> Unit)? = null) {
+        currentSlot = slot
+        val stateFile = stateFile(slot)
         if (!stateFile.isFile) { statusText.text = getString(R.string.in_game_no_save_state); return }
         statusText.text = getString(R.string.in_game_loading_state)
         enqueueEmulationTask {
@@ -637,6 +575,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
             runOnUiThread {
                 if (result == "loaded") {
                     statusText.text = getString(R.string.in_game_state_loaded)
+                    onSuccess?.invoke()
                     resumeGame()
                 } else {
                     statusText.text = result
@@ -673,13 +612,141 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         }
     }
 
-    private fun refreshThumbnail(thumbnail: ImageView, loadButton: MaterialButton) {
-        val thumbFile = stateThumbnailFile(currentSlot)
-        val bitmap = if (thumbFile.isFile) BitmapFactory.decodeFile(thumbFile.absolutePath) else null
-        thumbnail.setImageBitmap(bitmap)
-        thumbnail.alpha = if (bitmap == null) 0.35f else 1f
-        thumbnail.contentDescription = if (bitmap == null) getString(R.string.in_game_no_save_state) else getString(R.string.in_game_state_thumbnail)
-        loadButton.isEnabled = stateFile(currentSlot).isFile
+    private fun showSlotPickerDialog(isSave: Boolean) {
+        val isNight  = isNightMode()
+        val panelBg  = if (isNight) Color.parseColor("#1E1F28") else Color.parseColor("#F2F2F7")
+        val onSurf   = if (isNight) Color.WHITE else Color.parseColor("#212121")
+        val muted    = if (isNight) Color.parseColor("#AAAAAA") else Color.parseColor("#757575")
+        val divider  = if (isNight) Color.parseColor("#2E2F3A") else Color.parseColor("#DCDCE0")
+        val green    = Color.parseColor("#00C063")
+        val red      = Color.parseColor("#D93131")
+
+        val dialogOverlay = FrameLayout(this).apply {
+            setBackgroundColor(Color.argb(190, 0, 0, 0))
+            isClickable = true
+            isFocusable = true
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16.dp, 16.dp, 16.dp, 16.dp)
+            background = GradientDrawable().apply {
+                setColor(panelBg)
+                cornerRadius = 14f * resources.displayMetrics.density
+            }
+        }
+
+        val mp = LinearLayout.LayoutParams.MATCH_PARENT
+        val wc = LinearLayout.LayoutParams.WRAP_CONTENT
+
+        panel.addView(TextView(this).apply {
+            text = if (isSave) getString(R.string.in_game_save_state) else getString(R.string.in_game_load_state)
+            setTextColor(onSurf)
+            textSize = 18f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(mp, wc).apply { bottomMargin = 6.dp })
+
+        val statusText = TextView(this).apply {
+            setTextColor(muted)
+            textSize = 13f
+            gravity = Gravity.CENTER
+        }
+        panel.addView(statusText, LinearLayout.LayoutParams(mp, wc).apply { bottomMargin = 8.dp })
+
+        data class SlotRow(val thumb: ImageView, val btn: MaterialButton, val label: TextView)
+        val slotRows = mutableListOf<SlotRow>()
+
+        val slotContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+        for (slot in 1..SAVE_SLOT_COUNT) {
+            val thumbFile = stateThumbnailFile(slot)
+            val hasState = stateFile(slot).isFile
+
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(4.dp, 10.dp, 4.dp, 10.dp)
+                gravity = Gravity.CENTER_VERTICAL
+            }
+
+            val thumbView = ImageView(this).apply {
+                setBackgroundColor(Color.rgb(22, 23, 30))
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                adjustViewBounds = false
+                val bmp = if (thumbFile.isFile) BitmapFactory.decodeFile(thumbFile.absolutePath) else null
+                setImageBitmap(bmp)
+                alpha = if (bmp != null) 1f else 0.35f
+                isClickable = true
+                setOnClickListener {
+                    if (thumbFile.isFile) showExpandedThumbnail(thumbFile)
+                }
+            }
+            row.addView(thumbView, LinearLayout.LayoutParams(108.dp, 68.dp).apply { marginEnd = 12.dp })
+
+            val infoCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val labelText = TextView(this).apply {
+                text = "Slot $slot  ${if (hasState) "●" else "○"}"
+                setTextColor(onSurf)
+                textSize = 15f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            }
+            infoCol.addView(labelText)
+            if (!hasState) {
+                infoCol.addView(TextView(this).apply {
+                    text = getString(R.string.in_game_no_save_state)
+                    setTextColor(muted)
+                    textSize = 12f
+                })
+            }
+            row.addView(infoCol, LinearLayout.LayoutParams(0, wc, 1f))
+
+            val actionBtn = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                text = if (isSave) getString(R.string.in_game_save_state) else getString(R.string.in_game_load_state)
+                setTextColor(green)
+                strokeColor = ColorStateList.valueOf(green)
+                rippleColor = ColorStateList.valueOf(green)
+                isEnabled = if (isSave) true else hasState
+            }
+            slotRows.add(SlotRow(thumbView, actionBtn, labelText))
+
+            actionBtn.setOnClickListener {
+                if (isSave) {
+                    saveStateFromMenu(slot, statusText) { updatedThumbFile, _ ->
+                        val bmp = if (updatedThumbFile.isFile) BitmapFactory.decodeFile(updatedThumbFile.absolutePath) else null
+                        thumbView.setImageBitmap(bmp)
+                        thumbView.alpha = if (bmp != null) 1f else 0.35f
+                        labelText.text = "Slot $slot  ${if (stateFile(slot).isFile) "●" else "○"}"
+                    }
+                } else {
+                    loadStateFromMenu(slot, statusText) { rootContainer.removeView(dialogOverlay) }
+                }
+            }
+
+            row.addView(actionBtn, LinearLayout.LayoutParams(wc, wc))
+            slotContainer.addView(row, LinearLayout.LayoutParams(mp, wc))
+
+            if (slot < SAVE_SLOT_COUNT) {
+                slotContainer.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(mp, 1))
+            }
+        }
+
+        val slotScroll = ScrollView(this).apply {
+            addView(slotContainer, FrameLayout.LayoutParams(mp, wc))
+        }
+        panel.addView(slotScroll, LinearLayout.LayoutParams(mp, 0, 1f))
+        panel.addView(coloredMenuButton("Close", red) {
+            rootContainer.removeView(dialogOverlay)
+        }, LinearLayout.LayoutParams(mp, wc).apply { topMargin = 8.dp })
+
+        val screenWidth  = rootContainer.width.takeIf  { it > 0 } ?: resources.displayMetrics.widthPixels
+        val screenHeight = rootContainer.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+        val dialogWidth  = (screenWidth - 24.dp).coerceAtMost(560.dp)
+        val dialogHeight = (screenHeight * 0.85f).toInt().coerceAtLeast(420.dp)
+
+        dialogOverlay.addView(panel, FrameLayout.LayoutParams(dialogWidth, dialogHeight, Gravity.CENTER))
+        rootContainer.addView(dialogOverlay, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
     }
 
     private fun showExpandedThumbnail(file: File) {
@@ -712,30 +779,11 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
                 .apply { topMargin = 8.dp }
         }
 
-    private fun slotNavButton(symbol: String, color: Int, onClick: () -> Unit): TextView =
-        TextView(this).apply {
-            text = symbol
-            setTextColor(color)
-            textSize = 24f
-            gravity = Gravity.CENTER
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { onClick() }
-        }
-
-    private fun slotLabel(slot: Int): String {
-        val dot = if (stateFile(slot).isFile) "●" else "○"
-        return "Slot $slot  $dot"
-    }
-
     private fun clearControllerInputs() {
         keyButtonMask = 0; axisButtonMask = 0; touchButtonMask = 0
         analogStickX = 0; analogStickY = 0; touchAnalogStickX = 0; touchAnalogStickY = 0
         pushControllerState()
     }
-
-    private fun stateStatusText(slot: Int = currentSlot): String =
-        if (stateFile(slot).isFile) getString(R.string.in_game_save_state_available) else getString(R.string.in_game_no_save_state)
 
     private fun stateFile(slot: Int = currentSlot): File =
         File(stateDirectory(), "${stateBaseName()}_slot${slot}.state")
