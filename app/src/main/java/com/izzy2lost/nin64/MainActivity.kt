@@ -6,13 +6,16 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.graphics.Color
+import android.view.Menu
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ImageView
+import android.widget.PopupMenu
 import android.widget.RelativeLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -27,8 +30,12 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
+import org.apache.commons.compress.archivers.sevenz.SevenZFile
 import java.io.File
+import java.io.OutputStream
 import java.util.ArrayDeque
+import java.util.Locale
+import java.util.zip.ZipInputStream
 
 class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
@@ -45,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var gridAdapter: GridAdapter
     private val romEntries = mutableListOf<RomEntry>()
     private var viewMode: String = VIEW_MODE_LIST
+    private var pendingTexturePackEntry: RomEntry? = null
 
     private val prefs by lazy {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -61,6 +69,17 @@ class MainActivity : AppCompatActivity() {
             saveRomFolderUri(uri)
             updateEmptyState()
             loadAvailableRoms()
+        }
+
+    private val texturePackPicker =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            val entry = pendingTexturePackEntry
+            pendingTexturePackEntry = null
+            if (uri == null || entry == null) {
+                return@registerForActivityResult
+            }
+
+            importTexturePack(entry, uri)
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -248,6 +267,9 @@ class MainActivity : AppCompatActivity() {
             displayName = displayName,
             fileName = fileName,
             fallbackName = fallbackName,
+            headerTitle = identity?.headerTitle ?: fallbackName,
+            md5 = identity?.md5,
+            crc = identity?.crc,
             databaseName = databaseName,
             documentUri = uri,
         )
@@ -266,6 +288,9 @@ class MainActivity : AppCompatActivity() {
             displayName = displayName,
             fileName = fileName,
             fallbackName = fallbackName,
+            headerTitle = identity.headerTitle,
+            md5 = identity.md5,
+            crc = identity.crc,
             databaseName = databaseName,
             localFile = this,
         )
@@ -278,8 +303,15 @@ class MainActivity : AppCompatActivity() {
             try {
                 val rootDir = preferredRootDir().also { it.mkdirs() }
                 val romFile = prepareRomForBoot(entry)
+                val options = perGameOptionsFor(entry)
                 runOnUiThread {
-                    GameActivity.launch(this, rootDir.absolutePath, romFile.absolutePath)
+                    GameActivity.launch(
+                        this,
+                        rootDir.absolutePath,
+                        romFile.absolutePath,
+                        useTexturePack = options.useTexturePack,
+                        disableExpansionPak = options.disableExpansionPak,
+                    )
                 }
             } catch (t: Throwable) {
                 val error = t.stackTraceToString()
@@ -461,6 +493,304 @@ class MainActivity : AppCompatActivity() {
         applyViewMode()
     }
 
+    private fun showGameOptions(anchor: View, entry: RomEntry) {
+        val hasTexturePack = texturePackFileFor(entry).isFile
+        val texturePackEnabled = isTexturePackEnabled(entry)
+        val expansionPakDisabled = isExpansionPakDisabled(entry)
+        val popup = PopupMenu(this, anchor)
+
+        popup.menu.add(Menu.NONE, MENU_PLAY, 0, R.string.game_options_play)
+        popup.menu.add(
+            Menu.NONE,
+            MENU_ADD_TEXTURE_PACK,
+            1,
+            if (hasTexturePack) R.string.game_options_replace_texture_pack else R.string.game_options_add_texture_pack,
+        )
+        if (hasTexturePack) {
+            popup.menu.add(
+                Menu.NONE,
+                MENU_TOGGLE_TEXTURE_PACK,
+                2,
+                if (texturePackEnabled) R.string.game_options_disable_texture_pack else R.string.game_options_enable_texture_pack,
+            )
+            popup.menu.add(Menu.NONE, MENU_REMOVE_TEXTURE_PACK, 3, R.string.game_options_remove_texture_pack)
+        }
+        popup.menu.add(
+            Menu.NONE,
+            MENU_TOGGLE_EXPANSION_PAK,
+            4,
+            if (expansionPakDisabled) R.string.game_options_enable_expansion_pak else R.string.game_options_disable_expansion_pak,
+        )
+
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                MENU_PLAY -> {
+                    bootSelectedRom(entry)
+                    true
+                }
+                MENU_ADD_TEXTURE_PACK -> {
+                    pickTexturePack(entry)
+                    true
+                }
+                MENU_TOGGLE_TEXTURE_PACK -> {
+                    setTexturePackEnabled(entry, !texturePackEnabled)
+                    true
+                }
+                MENU_REMOVE_TEXTURE_PACK -> {
+                    removeTexturePack(entry)
+                    true
+                }
+                MENU_TOGGLE_EXPANSION_PAK -> {
+                    setExpansionPakDisabled(entry, !expansionPakDisabled)
+                    true
+                }
+                else -> false
+            }
+        }
+        popup.show()
+    }
+
+    private fun pickTexturePack(entry: RomEntry) {
+        pendingTexturePackEntry = entry
+        texturePackPicker.launch(arrayOf("*/*"))
+    }
+
+    private fun importTexturePack(entry: RomEntry, uri: Uri) {
+        val sourceName = displayNameForUri(uri)
+        Toast.makeText(this, getString(R.string.texture_pack_importing, sourceName), Toast.LENGTH_SHORT).show()
+
+        Thread {
+            val result = runCatching {
+                installTexturePackFromUri(entry, uri, sourceName)
+            }
+
+            runOnUiThread {
+                result.onSuccess { importResult ->
+                    Toast.makeText(
+                        this,
+                        getString(R.string.texture_pack_imported, importResult.sourceName, entry.displayName),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }.onFailure { error ->
+                    Toast.makeText(
+                        this,
+                        getString(R.string.texture_pack_import_failed, error.message ?: error.toString()),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun installTexturePackFromUri(entry: RomEntry, uri: Uri, sourceName: String): TexturePackImportResult {
+        val target = texturePackFileFor(entry)
+        val mimeType = contentResolver.getType(uri).orEmpty().lowercase(Locale.US)
+        val normalizedName = sourceName.lowercase(Locale.US)
+        val importedSourceName = when {
+            normalizedName.endsWith(".hts") -> copyDirectHts(uri, target)
+            normalizedName.endsWith(".zip") || mimeType.contains("zip") -> copyHtsFromZip(uri, sourceName, target)
+            normalizedName.endsWith(".7z") || mimeType.contains("7z") -> copyHtsFromSevenZ(uri, sourceName, target)
+            else -> error(getString(R.string.texture_pack_unsupported_format))
+        }
+
+        prefs.edit()
+            .putBoolean(texturePackEnabledPrefKey(entry), true)
+            .putString(texturePackSourcePrefKey(entry), importedSourceName)
+            .apply()
+
+        return TexturePackImportResult(importedSourceName)
+    }
+
+    private fun copyDirectHts(uri: Uri, target: File): String {
+        contentResolver.openInputStream(uri)?.use { input ->
+            writeAtomically(target) { output ->
+                input.copyTo(output)
+            }
+        } ?: error(getString(R.string.texture_pack_open_failed))
+
+        return target.name
+    }
+
+    private fun copyHtsFromZip(uri: Uri, sourceName: String, target: File): String {
+        var selectedName: String? = null
+        contentResolver.openInputStream(uri)?.use { input ->
+            ZipInputStream(input).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    val entryFileName = archiveFileName(entry.name)
+                    if (!entry.isDirectory && entryFileName.endsWith(".hts", ignoreCase = true)) {
+                        if (selectedName == null || entryFileName.equals(target.name, ignoreCase = true)) {
+                            writeAtomically(target) { output ->
+                                zip.copyTo(output)
+                            }
+                            selectedName = entryFileName
+                            if (entryFileName.equals(target.name, ignoreCase = true)) {
+                                break
+                            }
+                        }
+                    }
+                    zip.closeEntry()
+                    entry = zip.nextEntry
+                }
+            }
+        } ?: error(getString(R.string.texture_pack_open_failed))
+
+        return selectedName ?: error(getString(R.string.texture_pack_missing_hts, sourceName))
+    }
+
+    private fun copyHtsFromSevenZ(uri: Uri, sourceName: String, target: File): String {
+        val archive = File.createTempFile("nin64-texture-pack-", ".7z", cacheDir)
+        try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                archive.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            } ?: error(getString(R.string.texture_pack_open_failed))
+
+            var selectedName: String? = null
+            SevenZFile.builder().setFile(archive).get().use { sevenZ ->
+                var entry = sevenZ.nextEntry
+                while (entry != null) {
+                    val entryFileName = archiveFileName(entry.name)
+                    if (!entry.isDirectory && entry.hasStream() && entryFileName.endsWith(".hts", ignoreCase = true)) {
+                        if (selectedName == null || entryFileName.equals(target.name, ignoreCase = true)) {
+                            writeAtomically(target) { output ->
+                                sevenZ.copyCurrentEntryTo(output)
+                            }
+                            selectedName = entryFileName
+                            if (entryFileName.equals(target.name, ignoreCase = true)) {
+                                break
+                            }
+                        }
+                    }
+                    entry = sevenZ.nextEntry
+                }
+            }
+
+            return selectedName ?: error(getString(R.string.texture_pack_missing_hts, sourceName))
+        } finally {
+            archive.delete()
+        }
+    }
+
+    private fun SevenZFile.copyCurrentEntryTo(output: OutputStream) {
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val read = read(buffer)
+            if (read < 0) {
+                break
+            }
+            if (read > 0) {
+                output.write(buffer, 0, read)
+            }
+        }
+    }
+
+    private fun writeAtomically(target: File, writer: (OutputStream) -> Unit) {
+        target.parentFile?.mkdirs()
+        val temp = File(target.parentFile, "${target.name}.tmp")
+        temp.delete()
+
+        try {
+            temp.outputStream().use(writer)
+            if (target.exists() && !target.delete()) {
+                error(getString(R.string.texture_pack_replace_failed))
+            }
+            if (!temp.renameTo(target)) {
+                temp.copyTo(target, overwrite = true)
+                temp.delete()
+            }
+        } catch (t: Throwable) {
+            temp.delete()
+            throw t
+        }
+    }
+
+    private fun removeTexturePack(entry: RomEntry) {
+        val target = texturePackFileFor(entry)
+        val removed = !target.exists() || target.delete()
+        if (removed) {
+            prefs.edit()
+                .putBoolean(texturePackEnabledPrefKey(entry), false)
+                .remove(texturePackSourcePrefKey(entry))
+                .apply()
+            Toast.makeText(this, getString(R.string.texture_pack_removed, entry.displayName), Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, getString(R.string.texture_pack_remove_failed), Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun setTexturePackEnabled(entry: RomEntry, enabled: Boolean) {
+        prefs.edit().putBoolean(texturePackEnabledPrefKey(entry), enabled).apply()
+        val message = if (enabled) {
+            getString(R.string.texture_pack_enabled, entry.displayName)
+        } else {
+            getString(R.string.texture_pack_disabled, entry.displayName)
+        }
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun setExpansionPakDisabled(entry: RomEntry, disabled: Boolean) {
+        prefs.edit().putBoolean(expansionPakDisabledPrefKey(entry), disabled).apply()
+        val message = if (disabled) {
+            getString(R.string.expansion_pak_disabled, entry.displayName)
+        } else {
+            getString(R.string.expansion_pak_enabled, entry.displayName)
+        }
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun perGameOptionsFor(entry: RomEntry): PerGameOptions {
+        return PerGameOptions(
+            useTexturePack = texturePackFileFor(entry).isFile && isTexturePackEnabled(entry),
+            disableExpansionPak = isExpansionPakDisabled(entry),
+        )
+    }
+
+    private fun texturePackFileFor(entry: RomEntry): File {
+        return File(texturePackCacheDirectory(), texturePackFileNameFor(entry))
+    }
+
+    private fun texturePackCacheDirectory(): File {
+        return File(preferredRootDir(), "Mupen64plus/cache").apply {
+            mkdirs()
+        }
+    }
+
+    private fun texturePackFileNameFor(entry: RomEntry): String {
+        val ident = entry.headerTitle
+            .ifBlank { entry.fallbackName }
+            .replace(':', '-')
+            .replace('/', '-')
+        return "${ident}_HIRESTEXTURES.hts"
+    }
+
+    private fun isTexturePackEnabled(entry: RomEntry): Boolean {
+        return prefs.getBoolean(texturePackEnabledPrefKey(entry), true)
+    }
+
+    private fun isExpansionPakDisabled(entry: RomEntry): Boolean {
+        return prefs.getBoolean(expansionPakDisabledPrefKey(entry), false)
+    }
+
+    private fun texturePackEnabledPrefKey(entry: RomEntry): String =
+        "per_game.${entry.preferenceKey()}.texture_pack_enabled"
+
+    private fun texturePackSourcePrefKey(entry: RomEntry): String =
+        "per_game.${entry.preferenceKey()}.texture_pack_source"
+
+    private fun expansionPakDisabledPrefKey(entry: RomEntry): String =
+        "per_game.${entry.preferenceKey()}.disable_expansion_pak"
+
+    private fun displayNameForUri(uri: Uri): String {
+        return DocumentFile.fromSingleUri(this, uri)?.name
+            ?: uri.lastPathSegment
+            ?: getString(R.string.game_options_add_texture_pack)
+    }
+
+    private fun archiveFileName(path: String): String =
+        path.replace('\\', '/').substringAfterLast('/')
+
     private inner class ListAdapter : RecyclerView.Adapter<ListAdapter.ViewHolder>() {
         private val bgColors = intArrayOf(
             Color.parseColor("#0056EA"),
@@ -490,6 +820,16 @@ class MainActivity : AppCompatActivity() {
                 val pos = holder.bindingAdapterPosition
                 if (pos != RecyclerView.NO_POSITION) {
                     romEntries.getOrNull(pos)?.let(::bootSelectedRom)
+                }
+            }
+            holder.itemView.setOnLongClickListener {
+                val pos = holder.bindingAdapterPosition
+                val entry = if (pos != RecyclerView.NO_POSITION) romEntries.getOrNull(pos) else null
+                if (entry != null) {
+                    showGameOptions(holder.itemView, entry)
+                    true
+                } else {
+                    false
                 }
             }
         }
@@ -545,21 +885,45 @@ class MainActivity : AppCompatActivity() {
                     romEntries.getOrNull(pos)?.let(::bootSelectedRom)
                 }
             }
+            holder.itemView.setOnLongClickListener {
+                val pos = holder.bindingAdapterPosition
+                val entry = if (pos != RecyclerView.NO_POSITION) romEntries.getOrNull(pos) else null
+                if (entry != null) {
+                    showGameOptions(holder.itemView, entry)
+                    true
+                } else {
+                    false
+                }
+            }
         }
 
         override fun getItemCount() = romEntries.size
     }
 
+    private data class PerGameOptions(
+        val useTexturePack: Boolean,
+        val disableExpansionPak: Boolean,
+    )
+
+    private data class TexturePackImportResult(
+        val sourceName: String,
+    )
+
     private data class RomEntry(
         val displayName: String,
         val fileName: String,
         val fallbackName: String,
+        val headerTitle: String,
+        val md5: String? = null,
+        val crc: String? = null,
         val databaseName: String? = null,
         val localFile: File? = null,
         val documentUri: Uri? = null,
     ) {
         fun coverCandidates(): List<String> =
             listOfNotNull(databaseName, displayName, fileName, fallbackName).distinct()
+
+        fun preferenceKey(): String = md5 ?: crc ?: fileName
 
         fun listLabel(): String {
             return if (displayName.equals(fallbackName, ignoreCase = true)) {
@@ -578,6 +942,12 @@ class MainActivity : AppCompatActivity() {
 
         private const val VIEW_MODE_LIST = "list"
         private const val VIEW_MODE_GRID = "grid"
+
+        private const val MENU_PLAY = 1
+        private const val MENU_ADD_TEXTURE_PACK = 2
+        private const val MENU_TOGGLE_TEXTURE_PACK = 3
+        private const val MENU_REMOVE_TEXTURE_PACK = 4
+        private const val MENU_TOGGLE_EXPANSION_PAK = 5
 
         private const val COVER_BASE_URL =
             "https://raw.githubusercontent.com/izzy2lost/n64_covers/main"

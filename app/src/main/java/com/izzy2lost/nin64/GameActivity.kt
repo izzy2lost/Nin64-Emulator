@@ -36,6 +36,8 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
     private val rootPath: String get() = intent.getStringExtra(EXTRA_ROOT_PATH) ?: ""
     private val romPath: String get() = intent.getStringExtra(EXTRA_ROM_PATH) ?: ""
+    private val useTexturePack: Boolean get() = intent.getBooleanExtra(EXTRA_USE_TEXTURE_PACK, false)
+    private val disableExpansionPak: Boolean get() = intent.getBooleanExtra(EXTRA_DISABLE_EXPANSION_PAK, false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,7 +99,35 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
             resPref.toIntOrNull()?.coerceIn(1, 8) ?: 1
         }
         NativeBridge.setOption("mupen64plus-EnableNativeResFactor", factor.toString())
+        applyPerGameEmulatorSettings()
         Log.i(logTag, "applyEmulatorSettings surfaceHeight=$surfaceHeight resFactor=$factor")
+    }
+
+    private fun applyPerGameEmulatorSettings() {
+        NativeBridge.setOption(
+            "mupen64plus-txHiresEnable",
+            if (useTexturePack) "True" else "False"
+        )
+        NativeBridge.setOption(
+            "mupen64plus-txHiresFullAlphaChannel",
+            if (useTexturePack) "True" else "False"
+        )
+        NativeBridge.setOption(
+            "mupen64plus-EnableEnhancedHighResStorage",
+            if (useTexturePack) "True" else "False"
+        )
+        NativeBridge.setOption(
+            "mupen64plus-CorrectTexrectCoords",
+            if (useTexturePack) "Auto" else "Off"
+        )
+        NativeBridge.setOption(
+            "mupen64plus-GLideN64IniBehaviour",
+            if (useTexturePack) "early" else "late"
+        )
+        NativeBridge.setOption(
+            "mupen64plus-ForceDisableExtraMem",
+            if (disableExpansionPak) "True" else "False"
+        )
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -348,6 +378,8 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     companion object {
         private const val EXTRA_ROOT_PATH = "extra_root_path"
         private const val EXTRA_ROM_PATH = "extra_rom_path"
+        private const val EXTRA_USE_TEXTURE_PACK = "extra_use_texture_pack"
+        private const val EXTRA_DISABLE_EXPANSION_PAK = "extra_disable_expansion_pak"
         private const val OPS_PER_CHUNK = 2_000_000
         private const val STICK_MAX = 80
         private const val C_BUTTON_THRESHOLD = 0.5f
@@ -369,11 +401,19 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         private const val N64_C_LEFT = 0x0200
         private const val N64_C_RIGHT = 0x0100
 
-        fun launch(context: Context, rootPath: String, romPath: String) {
+        fun launch(
+            context: Context,
+            rootPath: String,
+            romPath: String,
+            useTexturePack: Boolean = false,
+            disableExpansionPak: Boolean = false
+        ) {
             context.startActivity(
                 Intent(context, GameActivity::class.java)
                     .putExtra(EXTRA_ROOT_PATH, rootPath)
                     .putExtra(EXTRA_ROM_PATH, romPath)
+                    .putExtra(EXTRA_USE_TEXTURE_PACK, useTexturePack)
+                    .putExtra(EXTRA_DISABLE_EXPANSION_PAK, disableExpansionPak)
             )
         }
     }
