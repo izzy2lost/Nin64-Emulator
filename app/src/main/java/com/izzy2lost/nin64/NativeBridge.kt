@@ -12,6 +12,8 @@ object NativeBridge {
     external fun getFrameWidth(): Int
     external fun getFrameHeight(): Int
     external fun setControllerState(buttonMask: Int, stickX: Int, stickY: Int)
+    external fun saveState(path: String): String
+    external fun loadState(path: String): String
     external fun setSurface(surface: Surface?, width: Int, height: Int)
     external fun clearSurface()
     external fun shutdownSession()

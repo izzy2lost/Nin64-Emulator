@@ -66,6 +66,8 @@ typedef void (*retro_get_system_info_fn)(struct retro_system_info *info);
 typedef void (*retro_init_fn)(void);
 typedef bool (*retro_load_game_fn)(const struct retro_game_info *game);
 typedef void (*retro_run_fn)(void);
+typedef bool (*retro_serialize_fn)(void *data, size_t size);
+typedef size_t (*retro_serialize_size_fn)(void);
 typedef void (*retro_set_audio_sample_batch_fn)(retro_audio_sample_batch_t cb);
 typedef void (*retro_set_audio_sample_fn)(retro_audio_sample_t cb);
 typedef void (*retro_set_environment_fn)(retro_environment_t cb);
@@ -73,6 +75,7 @@ typedef void (*retro_set_input_poll_fn)(retro_input_poll_t cb);
 typedef void (*retro_set_input_state_fn)(retro_input_state_t cb);
 typedef void (*retro_set_video_refresh_fn)(retro_video_refresh_t cb);
 typedef void (*retro_unload_game_fn)(void);
+typedef bool (*retro_unserialize_fn)(const void *data, size_t size);
 
 typedef struct BridgeOption {
     char *key;
@@ -125,6 +128,8 @@ typedef struct LibretroBridge {
     retro_init_fn retro_init;
     retro_load_game_fn retro_load_game;
     retro_run_fn retro_run;
+    retro_serialize_fn retro_serialize;
+    retro_serialize_size_fn retro_serialize_size;
     retro_set_audio_sample_batch_fn retro_set_audio_sample_batch;
     retro_set_audio_sample_fn retro_set_audio_sample;
     retro_set_environment_fn retro_set_environment;
@@ -132,6 +137,7 @@ typedef struct LibretroBridge {
     retro_set_input_state_fn retro_set_input_state;
     retro_set_video_refresh_fn retro_set_video_refresh;
     retro_unload_game_fn retro_unload_game;
+    retro_unserialize_fn retro_unserialize;
 } LibretroBridge;
 
 static const BridgeOption g_default_options[] = {
@@ -170,6 +176,7 @@ static const char *bridge_find_surface_option_value(const char *key);
 static const char *bridge_find_registered_option_value(const char *key);
 static const char *bridge_find_user_option_value(const char *key);
 static int bridge_set_user_option(const char *key, const char *value);
+static int bridge_save_state_to_path(const char *path);
 static char *bridge_strdup(const char *src);
 static uintptr_t bridge_get_current_framebuffer(void);
 static retro_proc_address_t bridge_get_proc_address(const char *sym);
@@ -203,6 +210,7 @@ static void bridge_update_surface_options(int width, int height);
 static void bridge_set_surface_from_java(JNIEnv *env, jobject surface, jint width, jint height);
 static void bridge_shutdown(void);
 static void bridge_sleep_until_ns(uint64_t deadline_ns);
+static int bridge_load_state_from_path(const char *path);
 static void bridge_unload_game(void);
 static void bridge_video_refresh(const void *data, unsigned width, unsigned height, size_t pitch);
 static void copy_jstring(JNIEnv *env, jstring value, char *buffer, size_t buffer_size);
@@ -1408,6 +1416,8 @@ static int bridge_load_symbols(void)
     LOAD_SYMBOL(retro_init);
     LOAD_SYMBOL(retro_load_game);
     LOAD_SYMBOL(retro_run);
+    LOAD_SYMBOL(retro_serialize);
+    LOAD_SYMBOL(retro_serialize_size);
     LOAD_SYMBOL(retro_set_audio_sample);
     LOAD_SYMBOL(retro_set_audio_sample_batch);
     LOAD_SYMBOL(retro_set_environment);
@@ -1415,6 +1425,7 @@ static int bridge_load_symbols(void)
     LOAD_SYMBOL(retro_set_input_state);
     LOAD_SYMBOL(retro_set_video_refresh);
     LOAD_SYMBOL(retro_unload_game);
+    LOAD_SYMBOL(retro_unserialize);
 
 #undef LOAD_SYMBOL
 
@@ -1657,6 +1668,113 @@ static void bridge_release_framebuffer(void)
     g_bridge.framebuffer_capacity_pixels = 0;
 }
 
+static int bridge_save_state_to_path(const char *path)
+{
+    size_t state_size;
+    uint8_t *state_data = NULL;
+    FILE *file = NULL;
+    char temp_path[4096];
+    size_t written;
+
+    if (!path || !path[0]) {
+        bridge_set_error("Save state path is empty.");
+        return 0;
+    }
+
+    if (!g_bridge.game_loaded) {
+        bridge_set_error("Cannot save state because no game is loaded.");
+        return 0;
+    }
+
+    state_size = g_bridge.retro_serialize_size ? g_bridge.retro_serialize_size() : 0;
+    if (state_size == 0) {
+        bridge_set_error("This core did not report a save state size.");
+        return 0;
+    }
+
+    state_data = (uint8_t *)malloc(state_size);
+    if (!state_data) {
+        bridge_set_error("Unable to allocate %zu bytes for save state.", state_size);
+        return 0;
+    }
+
+    if (!g_bridge.retro_serialize(state_data, state_size)) {
+        bridge_set_error("retro_serialize() failed.");
+        free(state_data);
+        return 0;
+    }
+
+    if (snprintf(temp_path, sizeof(temp_path), "%s.tmp", path) >= (int)sizeof(temp_path)) {
+        bridge_set_error("Save state path is too long.");
+        free(state_data);
+        return 0;
+    }
+
+    file = fopen(temp_path, "wb");
+    if (!file) {
+        bridge_set_error("Unable to open save state temp file %s: %s", temp_path, strerror(errno));
+        free(state_data);
+        return 0;
+    }
+
+    written = fwrite(state_data, 1u, state_size, file);
+    free(state_data);
+
+    if (written != state_size) {
+        bridge_set_error("Unable to write complete save state to %s.", temp_path);
+        fclose(file);
+        remove(temp_path);
+        return 0;
+    }
+
+    if (fclose(file) != 0) {
+        bridge_set_error("Unable to close save state temp file %s: %s", temp_path, strerror(errno));
+        remove(temp_path);
+        return 0;
+    }
+
+    remove(path);
+    if (rename(temp_path, path) != 0) {
+        bridge_set_error("Unable to move save state into place %s: %s", path, strerror(errno));
+        remove(temp_path);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int bridge_load_state_from_path(const char *path)
+{
+    void *state_data = NULL;
+    size_t state_size = 0;
+    int loaded;
+
+    if (!path || !path[0]) {
+        bridge_set_error("Load state path is empty.");
+        return 0;
+    }
+
+    if (!g_bridge.game_loaded) {
+        bridge_set_error("Cannot load state because no game is loaded.");
+        return 0;
+    }
+
+    if (!bridge_load_rom_file(path, &state_data, &state_size)) {
+        return 0;
+    }
+
+    loaded = g_bridge.retro_unserialize(state_data, state_size) ? 1 : 0;
+    free(state_data);
+
+    if (!loaded) {
+        bridge_set_error("retro_unserialize() failed for %s.", path);
+        return 0;
+    }
+
+    g_bridge.next_frame_deadline_ns = bridge_now_ns();
+    return 1;
+}
+
 static void bridge_shutdown(void)
 {
     bridge_unload_game();
@@ -1823,6 +1941,54 @@ Java_com_izzy2lost_nin64_NativeBridge_setControllerState(
     g_button_mask = (unsigned int)buttonMask;
     g_stick_x = (int)stickX;
     g_stick_y = (int)stickY;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_saveState(JNIEnv *env, jobject thiz, jstring path)
+{
+    const char *path_utf;
+    char message[1024];
+    int ok;
+
+    (void)thiz;
+
+    if (!path) {
+        return (*env)->NewStringUTF(env, "Save state path is empty.");
+    }
+
+    path_utf = (*env)->GetStringUTFChars(env, path, NULL);
+    if (!path_utf) {
+        return (*env)->NewStringUTF(env, "Unable to read save state path.");
+    }
+
+    ok = bridge_save_state_to_path(path_utf);
+    snprintf(message, sizeof(message), "%s", ok ? "saved" : (g_bridge.last_error[0] ? g_bridge.last_error : "Save state failed."));
+    (*env)->ReleaseStringUTFChars(env, path, path_utf);
+    return (*env)->NewStringUTF(env, message);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_loadState(JNIEnv *env, jobject thiz, jstring path)
+{
+    const char *path_utf;
+    char message[1024];
+    int ok;
+
+    (void)thiz;
+
+    if (!path) {
+        return (*env)->NewStringUTF(env, "Load state path is empty.");
+    }
+
+    path_utf = (*env)->GetStringUTFChars(env, path, NULL);
+    if (!path_utf) {
+        return (*env)->NewStringUTF(env, "Unable to read load state path.");
+    }
+
+    ok = bridge_load_state_from_path(path_utf);
+    snprintf(message, sizeof(message), "%s", ok ? "loaded" : (g_bridge.last_error[0] ? g_bridge.last_error : "Load state failed."));
+    (*env)->ReleaseStringUTFChars(env, path, path_utf);
+    return (*env)->NewStringUTF(env, message);
 }
 
 JNIEXPORT void JNICALL

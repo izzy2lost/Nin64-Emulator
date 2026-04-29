@@ -69,6 +69,19 @@
     <string name="hint_long_press_game">Long press a game for per-game settings</string>
     <string name="controls_capture_button">Press a button…</string>
     <string name="controls_capture_stick">Move a stick…</string>
+    <string name="in_game_menu">Menu</string>
+    <string name="in_game_resume">Resume</string>
+    <string name="in_game_quit">Quit</string>
+    <string name="in_game_save_state">Save State</string>
+    <string name="in_game_load_state">Load State</string>
+    <string name="in_game_saving_state">Saving state...</string>
+    <string name="in_game_loading_state">Loading state...</string>
+    <string name="in_game_state_saved">State saved.</string>
+    <string name="in_game_state_saved_no_thumbnail">State saved. Thumbnail unavailable.</string>
+    <string name="in_game_state_loaded">State loaded.</string>
+    <string name="in_game_no_save_state">No save state yet.</string>
+    <string name="in_game_save_state_available">Save state available.</string>
+    <string name="in_game_state_thumbnail">Save state thumbnail</string>
     <string name="done">Done</string>
     <!-- Compat strings still used in code -->
     <string name="initial_status">Ready.</string>
