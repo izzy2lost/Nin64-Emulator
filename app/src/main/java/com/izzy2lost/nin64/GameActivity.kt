@@ -73,6 +73,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private val useTexturePack: Boolean get() = intent.getBooleanExtra(EXTRA_USE_TEXTURE_PACK, false)
     private val disableExpansionPak: Boolean get() = intent.getBooleanExtra(EXTRA_DISABLE_EXPANSION_PAK, false)
     private val romPreferenceKey: String? get() = intent.getStringExtra(EXTRA_ROM_PREFERENCE_KEY)
+    private val romCrc: String? get() = intent.getStringExtra(EXTRA_ROM_CRC)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -250,6 +251,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
                     return@Thread
                 }
 
+                applyEnabledCheats()
                 updateSurfaceLayoutForCurrentFrame()
                 emulationLoop()
             } finally {
@@ -267,6 +269,12 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         running = false
         emulationThread?.join(3000)
         emulationThread = null
+    }
+
+    private fun applyEnabledCheats() {
+        val codeLines = CheatRepository.enabledCheatCodeLines(this, romPreferenceKey, romCrc)
+        NativeBridge.setCheats(codeLines.toTypedArray())
+        Log.i(logTag, "applied ${codeLines.size} cheat(s)")
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -766,6 +774,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         private const val EXTRA_USE_TEXTURE_PACK = "extra_use_texture_pack"
         private const val EXTRA_DISABLE_EXPANSION_PAK = "extra_disable_expansion_pak"
         private const val EXTRA_ROM_PREFERENCE_KEY = "extra_rom_preference_key"
+        private const val EXTRA_ROM_CRC = "extra_rom_crc"
         private const val OPS_PER_CHUNK = 2_000_000
         private const val STICK_MAX = 80
         private const val AXIS_BUTTON_THRESHOLD = 0.45f
@@ -777,7 +786,8 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
             romPath: String,
             useTexturePack: Boolean = false,
             disableExpansionPak: Boolean = false,
-            romPreferenceKey: String? = null
+            romPreferenceKey: String? = null,
+            romCrc: String? = null,
         ) {
             context.startActivity(
                 Intent(context, GameActivity::class.java)
@@ -786,6 +796,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
                     .putExtra(EXTRA_USE_TEXTURE_PACK, useTexturePack)
                     .putExtra(EXTRA_DISABLE_EXPANSION_PAK, disableExpansionPak)
                     .putExtra(EXTRA_ROM_PREFERENCE_KEY, romPreferenceKey)
+                    .putExtra(EXTRA_ROM_CRC, romCrc)
             )
         }
     }

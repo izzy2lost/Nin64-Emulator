@@ -19,4 +19,5 @@ object NativeBridge {
     external fun shutdownSession()
     external fun setOption(key: String, value: String)
     external fun setFastForwardEnabled(enabled: Boolean)
+    external fun setCheats(codeLines: Array<String>)
 }

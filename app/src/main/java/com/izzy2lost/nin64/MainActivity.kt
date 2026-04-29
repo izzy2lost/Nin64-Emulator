@@ -288,6 +288,7 @@ class MainActivity : AppCompatActivity() {
                         useTexturePack = options.useTexturePack,
                         disableExpansionPak = options.disableExpansionPak,
                         romPreferenceKey = entry.preferenceKey(),
+                        romCrc = entry.crc,
                     )
                 }
             } catch (t: Throwable) {
@@ -498,7 +499,8 @@ class MainActivity : AppCompatActivity() {
             4,
             if (expansionPakDisabled) R.string.game_options_enable_expansion_pak else R.string.game_options_disable_expansion_pak,
         )
-        popup.menu.add(Menu.NONE, MENU_CONFIGURE_CONTROLS, 5, R.string.game_options_configure_controls)
+        popup.menu.add(Menu.NONE, MENU_CHEAT_MANAGER, 5, R.string.cheats_manager)
+        popup.menu.add(Menu.NONE, MENU_CONFIGURE_CONTROLS, 6, R.string.game_options_configure_controls)
 
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
@@ -520,6 +522,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 MENU_TOGGLE_EXPANSION_PAK -> {
                     setExpansionPakDisabled(entry, !expansionPakDisabled)
+                    true
+                }
+                MENU_CHEAT_MANAGER -> {
+                    CheatManagerActivity.launch(this, entry.preferenceKey(), entry.crc, entry.displayName)
                     true
                 }
                 MENU_CONFIGURE_CONTROLS -> {
@@ -930,6 +936,7 @@ class MainActivity : AppCompatActivity() {
         private const val MENU_REMOVE_TEXTURE_PACK = 4
         private const val MENU_TOGGLE_EXPANSION_PAK = 5
         private const val MENU_CONFIGURE_CONTROLS = 6
+        private const val MENU_CHEAT_MANAGER = 7
 
         private const val COVER_BASE_URL =
             "https://raw.githubusercontent.com/izzy2lost/n64_covers/main"

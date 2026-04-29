@@ -103,4 +103,27 @@ class ControlsConfigTest {
         assertEquals("per_game.mario.touch_layout", ControlsRepository.perGameTouchLayoutKey("mario"))
         assertEquals("per_game.mario.gamepad_mapping", ControlsRepository.perGameGamepadMappingKey("mario"))
     }
+
+    @Test
+    fun cheatCrcNormalizationMatchesMupenDatabaseShape() {
+        assertEquals("80F41131-384645F6", CheatDatabase.normalizeCrc("80F41131 384645F6"))
+        assertEquals("80F41131-384645F6", CheatDatabase.normalizeCrc("80F41131-384645F6-C:4A"))
+    }
+
+    @Test
+    fun cheatCodeLinesDropOptionLabels() {
+        assertEquals("8113D058 0000", CheatDatabase.normalizeCodeLine("8113D058 0000"))
+        assertEquals(
+            "8013CD0E 0001",
+            CheatDatabase.normalizeCodeLine("8013CD0E ???? 0001:\"1 Lap\",0002:\"2 Laps\""),
+        )
+    }
+
+    @Test
+    fun selectableCheatOptionsAreParsedAndResolved() {
+        val codeLine = CheatDatabase.parseCodeLine("8013CD0E ???? 0001:\"1 Lap\",0002:\"2 Laps\"")
+
+        assertEquals(listOf("1 Lap", "2 Laps"), codeLine?.options?.map { it.label })
+        assertEquals("8013CD0E 0002", codeLine?.resolvedText("0002"))
+    }
 }

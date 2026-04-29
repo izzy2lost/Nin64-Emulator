@@ -66,6 +66,8 @@ typedef void (*retro_get_system_info_fn)(struct retro_system_info *info);
 typedef void (*retro_init_fn)(void);
 typedef bool (*retro_load_game_fn)(const struct retro_game_info *game);
 typedef void (*retro_run_fn)(void);
+typedef void (*retro_cheat_reset_fn)(void);
+typedef void (*retro_cheat_set_fn)(unsigned index, bool enabled, const char *codeLine);
 typedef bool (*retro_serialize_fn)(void *data, size_t size);
 typedef size_t (*retro_serialize_size_fn)(void);
 typedef void (*retro_set_audio_sample_batch_fn)(retro_audio_sample_batch_t cb);
@@ -128,6 +130,8 @@ typedef struct LibretroBridge {
     retro_init_fn retro_init;
     retro_load_game_fn retro_load_game;
     retro_run_fn retro_run;
+    retro_cheat_reset_fn retro_cheat_reset;
+    retro_cheat_set_fn retro_cheat_set;
     retro_serialize_fn retro_serialize;
     retro_serialize_size_fn retro_serialize_size;
     retro_set_audio_sample_batch_fn retro_set_audio_sample_batch;
@@ -1417,6 +1421,8 @@ static int bridge_load_symbols(void)
     LOAD_SYMBOL(retro_init);
     LOAD_SYMBOL(retro_load_game);
     LOAD_SYMBOL(retro_run);
+    LOAD_SYMBOL(retro_cheat_reset);
+    LOAD_SYMBOL(retro_cheat_set);
     LOAD_SYMBOL(retro_serialize);
     LOAD_SYMBOL(retro_serialize_size);
     LOAD_SYMBOL(retro_set_audio_sample);
@@ -2061,6 +2067,43 @@ Java_com_izzy2lost_nin64_NativeBridge_setFastForwardEnabled(JNIEnv *env, jobject
     (void)env;
     (void)thiz;
     g_fast_forward_enabled = enabled ? 1 : 0;
+}
+
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_setCheats(JNIEnv *env, jobject thiz, jobjectArray codeLines)
+{
+    jsize count;
+    jsize index;
+
+    (void)thiz;
+
+    if (!g_bridge.retro_cheat_reset || !g_bridge.retro_cheat_set) {
+        return;
+    }
+
+    g_bridge.retro_cheat_reset();
+    if (!codeLines) {
+        return;
+    }
+
+    count = (*env)->GetArrayLength(env, codeLines);
+    for (index = 0; index < count; ++index) {
+        jstring code_line = (jstring)(*env)->GetObjectArrayElement(env, codeLines, index);
+        const char *code_line_utf;
+
+        if (!code_line) {
+            continue;
+        }
+
+        code_line_utf = (*env)->GetStringUTFChars(env, code_line, NULL);
+        if (code_line_utf && code_line_utf[0]) {
+            g_bridge.retro_cheat_set((unsigned)index, true, code_line_utf);
+        }
+        if (code_line_utf) {
+            (*env)->ReleaseStringUTFChars(env, code_line, code_line_utf);
+        }
+        (*env)->DeleteLocalRef(env, code_line);
+    }
 }
 
 JNIEXPORT jint JNICALL

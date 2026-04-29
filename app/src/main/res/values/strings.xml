@@ -50,6 +50,9 @@
     <string name="controls_edit_touch_layout">Edit Touch Layout</string>
     <string name="controls_edit_controller_mapping">Edit Controller Mapping</string>
     <string name="controls_reset_controls">Reset Controls</string>
+    <string name="cheats_manager">Cheat Manager</string>
+    <string name="cheats_no_crc">Cheats are unavailable because this ROM has no readable CRC.</string>
+    <string name="cheats_none_found">No cheats were found for this ROM.</string>
     <string name="controls_touch_layout">Touch Layout</string>
     <string name="controls_controller_mapping">Controller Mapping</string>
     <string name="controls_game_controls">Game Controls</string>

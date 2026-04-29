@@ -40,6 +40,10 @@
             android:exported="false"
             android:parentActivityName=".SettingsActivity" />
         <activity
+            android:name=".CheatManagerActivity"
+            android:exported="false"
+            android:parentActivityName=".GameControlSettingsActivity" />
+        <activity
             android:name=".GameControlSettingsActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity" />
