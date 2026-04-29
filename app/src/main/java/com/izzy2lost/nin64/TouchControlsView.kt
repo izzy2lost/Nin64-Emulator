@@ -28,8 +28,7 @@ class TouchControlsView @JvmOverloads constructor(
     var editorMode: Boolean = false
         set(value) {
             field = value
-            activeControlIds.clear()
-            notifyTouchState(0, 0, 0)
+            clearPlayTouchState()
             invalidate()
         }
 
@@ -56,6 +55,8 @@ class TouchControlsView @JvmOverloads constructor(
 
     private var editPointerId = MotionEvent.INVALID_POINTER_ID
     private var editControlId: String? = null
+    private var activeStickPointerId = MotionEvent.INVALID_POINTER_ID
+    private var activeStickControlId: String? = null
     private var activeStickX = 0
     private var activeStickY = 0
 
@@ -132,10 +133,7 @@ class TouchControlsView @JvmOverloads constructor(
 
     private fun handlePlayTouch(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
-            activeControlIds.clear()
-            activeStickX = 0
-            activeStickY = 0
-            notifyTouchState(0, 0, 0)
+            clearPlayTouchState()
             invalidate()
             return true
         }
@@ -145,28 +143,67 @@ class TouchControlsView @JvmOverloads constructor(
             MotionEvent.ACTION_POINTER_UP -> event.actionIndex
             else -> -1
         }
+        val liftedPointerId = if (liftedPointerIndex >= 0) {
+            event.getPointerId(liftedPointerIndex)
+        } else {
+            MotionEvent.INVALID_POINTER_ID
+        }
+
+        if (liftedPointerId == activeStickPointerId) {
+            activeStickPointerId = MotionEvent.INVALID_POINTER_ID
+            activeStickControlId = null
+        }
+
+        if (event.actionMasked == MotionEvent.ACTION_DOWN ||
+            event.actionMasked == MotionEvent.ACTION_POINTER_DOWN
+        ) {
+            val pointerIndex = event.actionIndex
+            val control = findControlAt(event.getX(pointerIndex), event.getY(pointerIndex), includeInvisible = false)
+            if (control?.target == N64Target.ANALOG_STICK &&
+                activeStickPointerId == MotionEvent.INVALID_POINTER_ID
+            ) {
+                activeStickPointerId = event.getPointerId(pointerIndex)
+                activeStickControlId = control.id
+            }
+        }
 
         var buttonMask = 0
         var stickX = 0
         var stickY = 0
-        var bestStickMagnitude = 0f
         val touchedControls = mutableSetOf<String>()
+
+        val stickPointerIndex = event.findPointerIndex(activeStickPointerId)
+        val stickControl = activeStickControl()
+        if (stickPointerIndex >= 0 && stickControl != null) {
+            touchedControls += stickControl.id
+            val (capturedStickX, capturedStickY) = calculateStickState(
+                stickControl,
+                event.getX(stickPointerIndex),
+                event.getY(stickPointerIndex),
+            )
+            stickX = capturedStickX
+            stickY = capturedStickY
+        } else {
+            activeStickPointerId = MotionEvent.INVALID_POINTER_ID
+            activeStickControlId = null
+        }
 
         for (index in 0 until event.pointerCount) {
             if (index == liftedPointerIndex) continue
+            if (event.getPointerId(index) == activeStickPointerId) continue
             val control = findControlAt(event.getX(index), event.getY(index), includeInvisible = false) ?: continue
             touchedControls += control.id
             if (control.target == N64Target.ANALOG_STICK) {
-                val centerX = control.x * width
-                val centerY = control.y * height
-                val radius = controlRadius(control).coerceAtLeast(1f)
-                val rawX = ((event.getX(index) - centerX) / radius).coerceIn(-1f, 1f)
-                val rawY = ((centerY - event.getY(index)) / radius).coerceIn(-1f, 1f)
-                val magnitude = hypot(rawX, rawY)
-                if (magnitude > bestStickMagnitude) {
-                    bestStickMagnitude = magnitude
-                    stickX = (rawX * STICK_MAX).roundToInt().coerceIn(-STICK_MAX, STICK_MAX)
-                    stickY = (rawY * STICK_MAX).roundToInt().coerceIn(-STICK_MAX, STICK_MAX)
+                if (activeStickPointerId == MotionEvent.INVALID_POINTER_ID) {
+                    activeStickPointerId = event.getPointerId(index)
+                    activeStickControlId = control.id
+                    val (capturedStickX, capturedStickY) = calculateStickState(
+                        control,
+                        event.getX(index),
+                        event.getY(index),
+                    )
+                    stickX = capturedStickX
+                    stickY = capturedStickY
                 }
             } else {
                 buttonMask = buttonMask or control.target.buttonMask
@@ -180,6 +217,32 @@ class TouchControlsView @JvmOverloads constructor(
         notifyTouchState(buttonMask, stickX, stickY)
         invalidate()
         return true
+    }
+
+    private fun clearPlayTouchState() {
+        activeControlIds.clear()
+        activeStickPointerId = MotionEvent.INVALID_POINTER_ID
+        activeStickControlId = null
+        activeStickX = 0
+        activeStickY = 0
+        notifyTouchState(0, 0, 0)
+    }
+
+    private fun activeStickControl(): TouchControl? {
+        val stickControlId = activeStickControlId ?: return null
+        return layout.controls.firstOrNull {
+            it.id == stickControlId && it.visible && it.target == N64Target.ANALOG_STICK
+        }
+    }
+
+    private fun calculateStickState(control: TouchControl, x: Float, y: Float): Pair<Int, Int> {
+        val centerX = control.x * width
+        val centerY = control.y * height
+        val radius = controlRadius(control).coerceAtLeast(1f)
+        val rawX = ((x - centerX) / radius).coerceIn(-1f, 1f)
+        val rawY = ((centerY - y) / radius).coerceIn(-1f, 1f)
+        return (rawX * STICK_MAX).roundToInt().coerceIn(-STICK_MAX, STICK_MAX) to
+            (rawY * STICK_MAX).roundToInt().coerceIn(-STICK_MAX, STICK_MAX)
     }
 
     private fun drawControl(canvas: Canvas, control: TouchControl, minDimension: Float) {

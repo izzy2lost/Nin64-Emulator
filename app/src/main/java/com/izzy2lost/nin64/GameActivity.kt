@@ -46,8 +46,10 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private lateinit var touchControlsView: TouchControlsView
     private lateinit var visibilityToggle: ImageButton
     private lateinit var menuButton: ImageButton
+    private lateinit var fastForwardButton: ImageButton
     private lateinit var controlsConfig: ControlsConfig
     private var touchControlsVisible = true
+    private var fastForwardEnabled = false
     private var menuOverlay: View? = null
     private var currentSlot = 1
 
@@ -74,12 +76,10 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableNin64EdgeToEdge(immersive = true)
         controlsConfig = ControlsRepository.load(this, romPreferenceKey)
 
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-            WindowManager.LayoutParams.FLAG_FULLSCREEN
-        )
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         rootContainer = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -137,6 +137,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
                 marginEnd = btnMargin
             }
         )
+        visibilityToggle.applySafeAreaMargins(applyEnd = true, applyBottom = true)
 
         menuButton = ImageButton(this).apply {
             setImageResource(R.drawable.ic_menu)
@@ -155,6 +156,23 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
                 marginStart = btnMargin
             }
         )
+        menuButton.applySafeAreaMargins(applyStart = true, applyTop = true)
+
+        fastForwardButton = ImageButton(this).apply {
+            setImageResource(R.drawable.fast_forward_24px)
+            setColorFilter(Color.WHITE)
+            background = circularButtonBackground(Color.argb(170, 14, 15, 20))
+            contentDescription = getString(R.string.in_game_fast_forward)
+            setOnClickListener { setFastForwardEnabled(!fastForwardEnabled) }
+        }
+        rootContainer.addView(
+            fastForwardButton,
+            FrameLayout.LayoutParams(btnSize, btnSize, Gravity.TOP or Gravity.END).apply {
+                topMargin = btnMargin
+                marginEnd = btnMargin
+            }
+        )
+        fastForwardButton.applySafeAreaMargins(applyTop = true, applyEnd = true)
 
         setContentView(rootContainer)
         surfaceView.holder.addCallback(this)
@@ -245,6 +263,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     }
 
     private fun stopEmulation() {
+        setFastForwardEnabled(false)
         running = false
         emulationThread?.join(3000)
         emulationThread = null
@@ -395,6 +414,30 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
             pushControllerState()
         }
     }
+
+    private fun setFastForwardEnabled(enabled: Boolean) {
+        if (fastForwardEnabled == enabled) return
+        fastForwardEnabled = enabled
+        NativeBridge.setFastForwardEnabled(enabled)
+        updateFastForwardButton()
+    }
+
+    private fun updateFastForwardButton() {
+        if (!::fastForwardButton.isInitialized) return
+        fastForwardButton.setColorFilter(if (fastForwardEnabled) Color.rgb(32, 34, 40) else Color.WHITE)
+        fastForwardButton.background = circularButtonBackground(
+            if (fastForwardEnabled) Color.argb(230, 254, 223, 90) else Color.argb(170, 14, 15, 20)
+        )
+        fastForwardButton.contentDescription = getString(
+            if (fastForwardEnabled) R.string.in_game_fast_forward_enabled else R.string.in_game_fast_forward
+        )
+    }
+
+    private fun circularButtonBackground(color: Int): GradientDrawable =
+        GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(color)
+        }
 
     private fun handleMenuComboKey(event: KeyEvent): Boolean {
         if (!isGamepadSource(event.source)) return false

@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/settingsRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="?attr/colorSurface"
-    android:orientation="vertical"
-    android:fitsSystemWindows="true">
+    android:orientation="vertical">
 
     <!-- Top bar -->
     <LinearLayout
+        android:id="@+id/topBar"
         android:layout_width="match_parent"
         android:layout_height="64dp"
         android:orientation="horizontal"
@@ -36,6 +37,7 @@
 
     <!-- Settings content -->
     <ScrollView
+        android:id="@+id/settingsScroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">

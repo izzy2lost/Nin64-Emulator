@@ -45,7 +45,11 @@ class SettingsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableNin64EdgeToEdge()
         setContentView(R.layout.activity_settings)
+
+        findViewById<View>(R.id.topBar).applyTopBarInsets()
+        findViewById<View>(R.id.settingsScroll).applyBottomContentInsets()
 
         folderPathText = findViewById(R.id.folderPathText)
 

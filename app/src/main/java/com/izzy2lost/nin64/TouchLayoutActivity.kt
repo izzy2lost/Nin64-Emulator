@@ -25,10 +25,11 @@ class TouchLayoutActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableNin64EdgeToEdge(immersive = true)
         romKey = intent.getStringExtra(EXTRA_ROM_KEY)
         currentLayout = ControlsRepository.loadTouchLayout(this, romKey)
 
-        val root = FrameLayout(this).apply { fitsSystemWindows = true }
+        val root = FrameLayout(this)
 
         touchView = TouchControlsView(this).apply {
             layout = currentLayout
@@ -44,13 +45,15 @@ class TouchLayoutActivity : AppCompatActivity() {
             FrameLayout.LayoutParams.MATCH_PARENT,
         ))
 
-        root.addView(buildCluster(), FrameLayout.LayoutParams(
+        val cluster = buildCluster()
+        root.addView(cluster, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.CENTER,
         ))
 
         setContentView(root)
+        cluster.applySafeAreaMargins(applyStart = true, applyTop = true, applyEnd = true, applyBottom = true)
     }
 
     private fun buildCluster(): View = LinearLayout(this).apply {

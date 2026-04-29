@@ -18,4 +18,5 @@ object NativeBridge {
     external fun clearSurface()
     external fun shutdownSession()
     external fun setOption(key: String, value: String)
+    external fun setFastForwardEnabled(enabled: Boolean)
 }

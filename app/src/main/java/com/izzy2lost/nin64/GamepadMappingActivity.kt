@@ -27,15 +27,16 @@ class GamepadMappingActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableNin64EdgeToEdge()
         romKey = intent.getStringExtra(EXTRA_ROM_KEY)
         currentMapping = ControlsRepository.loadGamepadMapping(this, romKey)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BG_COLOR)
-            fitsSystemWindows = true
         }
-        root.addView(createTopBar())
+        val topBar = createTopBar()
+        root.addView(topBar)
 
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -53,11 +54,14 @@ class GamepadMappingActivity : AppCompatActivity() {
             }
         }
 
+        val scrollView = ScrollView(this).apply { addView(container) }
         root.addView(
-            ScrollView(this).apply { addView(container) },
+            scrollView,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f),
         )
         setContentView(root)
+        topBar.applyTopBarInsets()
+        scrollView.applyBottomContentInsets()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {

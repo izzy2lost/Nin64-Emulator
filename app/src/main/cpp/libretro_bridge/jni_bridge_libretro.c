@@ -160,6 +160,7 @@ static pthread_mutex_t g_bridge_mutex = PTHREAD_MUTEX_INITIALIZER;
 static volatile unsigned int g_button_mask;
 static volatile int g_stick_x;
 static volatile int g_stick_y;
+static volatile int g_fast_forward_enabled;
 static unsigned g_hw_frame_log_count;
 static unsigned g_sw_frame_log_count;
 static unsigned g_run_frame_log_count;
@@ -1554,6 +1555,7 @@ static void bridge_reset_video_state(void)
     g_bridge.swap_count = 0;
     g_bridge.frame_interval_ns = DEFAULT_FRAME_INTERVAL_NS;
     g_bridge.next_frame_deadline_ns = 0;
+    g_fast_forward_enabled = 0;
 }
 
 static void bridge_unload_game(void)
@@ -1831,6 +1833,7 @@ static void bridge_sleep_until_ns(uint64_t deadline_ns)
 static void bridge_run_frame(void)
 {
     uint64_t now_ns;
+    int fast_forward_enabled;
 
     if (!g_bridge.game_loaded) {
         return;
@@ -1856,12 +1859,20 @@ static void bridge_run_frame(void)
         g_bridge.next_frame_deadline_ns = bridge_now_ns();
     }
 
-    bridge_sleep_until_ns(g_bridge.next_frame_deadline_ns);
+    fast_forward_enabled = g_fast_forward_enabled;
+    if (!fast_forward_enabled) {
+        bridge_sleep_until_ns(g_bridge.next_frame_deadline_ns);
+    }
     g_bridge.retro_run();
 
     now_ns = bridge_now_ns();
     if (!g_bridge.frame_interval_ns) {
         g_bridge.frame_interval_ns = DEFAULT_FRAME_INTERVAL_NS;
+    }
+
+    if (g_fast_forward_enabled) {
+        g_bridge.next_frame_deadline_ns = now_ns + g_bridge.frame_interval_ns;
+        return;
     }
 
     g_bridge.next_frame_deadline_ns += g_bridge.frame_interval_ns;
@@ -2044,6 +2055,14 @@ Java_com_izzy2lost_nin64_NativeBridge_setOption(JNIEnv *env, jobject thiz, jstri
     if (value_utf) (*env)->ReleaseStringUTFChars(env, value, value_utf);
 }
 
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_setFastForwardEnabled(JNIEnv *env, jobject thiz, jboolean enabled)
+{
+    (void)env;
+    (void)thiz;
+    g_fast_forward_enabled = enabled ? 1 : 0;
+}
+
 JNIEXPORT jint JNICALL
 JNI_OnLoad(JavaVM *vm, void *reserved)
 {
@@ -2053,6 +2072,7 @@ JNI_OnLoad(JavaVM *vm, void *reserved)
     g_bridge.egl_display = EGL_NO_DISPLAY;
     g_bridge.egl_context = EGL_NO_CONTEXT;
     g_bridge.egl_surface = EGL_NO_SURFACE;
+    g_fast_forward_enabled = 0;
     return JNI_VERSION_1_6;
 }
 

@@ -70,6 +70,8 @@
     <string name="controls_capture_button">Press a button…</string>
     <string name="controls_capture_stick">Move a stick…</string>
     <string name="in_game_menu">Menu</string>
+    <string name="in_game_fast_forward">Fast forward</string>
+    <string name="in_game_fast_forward_enabled">Fast forward on</string>
     <string name="in_game_resume">Resume</string>
     <string name="in_game_quit">Quit</string>
     <string name="in_game_save_state">Save State</string>

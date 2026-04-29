@@ -3,6 +3,7 @@ package com.izzy2lost.nin64
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
@@ -15,6 +16,7 @@ class GameControlSettingsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableNin64EdgeToEdge()
         romKey = intent.getStringExtra(EXTRA_ROM_KEY) ?: run {
             finish()
             return
@@ -22,6 +24,12 @@ class GameControlSettingsActivity : AppCompatActivity() {
         gameTitle = intent.getStringExtra(EXTRA_GAME_TITLE)
 
         setContentView(R.layout.activity_game_control_settings)
+        findViewById<View>(R.id.topBar).applyTopBarInsets()
+        findViewById<View>(R.id.controlsCard).applySafeAreaMargins(
+            applyStart = true,
+            applyEnd = true,
+            applyBottom = true,
+        )
 
         val base = getString(R.string.controls_game_controls)
         findViewById<TextView>(R.id.titleText).text =

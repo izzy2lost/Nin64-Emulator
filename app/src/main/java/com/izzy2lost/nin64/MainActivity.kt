@@ -21,11 +21,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
 import androidx.core.content.ContextCompat
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
-import androidx.core.view.updatePadding
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -84,21 +79,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            hide(WindowInsetsCompat.Type.navigationBars())
-            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
+        enableNin64EdgeToEdge()
         setContentView(R.layout.activity_main)
 
         val headerLayout = findViewById<RelativeLayout>(R.id.headerLayout)
-        ViewCompat.setOnApplyWindowInsetsListener(headerLayout) { view, insets ->
-            val topInset = insets.getInsets(
-                WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.displayCutout()
-            ).top
-            view.updatePadding(top = topInset)
-            insets
-        }
+        headerLayout.applyTopBarInsets()
 
         statusText = findViewById(R.id.statusText)
         configPathText = findViewById(R.id.configPathText)
@@ -107,16 +92,7 @@ class MainActivity : AppCompatActivity() {
         romRecyclerView = findViewById(R.id.romRecyclerView)
         framePreviewImage = findViewById(R.id.framePreviewImage)
         swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout)
-        ViewCompat.setOnApplyWindowInsetsListener(swipeRefreshLayout) { view, insets ->
-            val navInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            val cutoutInsets = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
-            view.updatePadding(
-                left = maxOf(navInsets.left, cutoutInsets.left),
-                right = maxOf(navInsets.right, cutoutInsets.right),
-                bottom = navInsets.bottom,
-            )
-            insets
-        }
+        swipeRefreshLayout.applyBottomContentInsets()
 
         pickFolderButton = findViewById(R.id.pickFolderButton)
         emptyRomListText = findViewById(R.id.emptyRomListText)
