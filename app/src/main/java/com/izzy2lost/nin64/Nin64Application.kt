@@ -7,6 +7,7 @@ import android.os.Bundle
 class Nin64Application : Application(), Application.ActivityLifecycleCallbacks {
     private var currentActivity: Activity? = null
     private var startedActivityCount = 0
+    private var lastStopWasConfigurationChange = false
 
     override fun onCreate() {
         super.onCreate()
@@ -16,18 +17,21 @@ class Nin64Application : Application(), Application.ActivityLifecycleCallbacks {
 
     override fun onActivityStarted(activity: Activity) {
         val appWasBackgrounded = startedActivityCount == 0
+        val returningFromConfigurationChange = lastStopWasConfigurationChange
+        lastStopWasConfigurationChange = false
         startedActivityCount += 1
 
         if (!AppOpenAdManager.isShowingAd()) {
             currentActivity = activity
         }
 
-        if (appWasBackgrounded) {
+        if (appWasBackgrounded && !returningFromConfigurationChange) {
             showAppOpenAdIfAppropriate(activity)
         }
     }
 
     override fun onActivityStopped(activity: Activity) {
+        lastStopWasConfigurationChange = activity.isChangingConfigurations
         startedActivityCount = (startedActivityCount - 1).coerceAtLeast(0)
     }
 
