@@ -944,10 +944,14 @@ class MainActivity : AppCompatActivity() {
 
             val stem = entry.fileName.substringBeforeLast('.', entry.fileName)
             val coverFile = CoverMatcher.resolve(entry.coverCandidates()) ?: "$stem.png"
-            val url = "$COVER_BASE_URL/${Uri.encode(coverFile)}"
+            val coverSource = CoverMatcher.coverSource(this@MainActivity, coverFile, COVER_BASE_URL) {
+                runOnUiThread {
+                    romRecyclerView.adapter?.notifyDataSetChanged()
+                }
+            }
 
             holder.fallback.visibility = View.VISIBLE
-            holder.cover.load(url) {
+            holder.cover.load(coverSource) {
                 crossfade(true)
                 placeholder(R.drawable.logo)
                 error(R.drawable.logo)
