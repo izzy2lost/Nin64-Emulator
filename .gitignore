@@ -10,6 +10,12 @@ local.properties
 *.hprof
 captures/
 
+# Generated Android release outputs
+app/release/
+
+# One-off Play/ADI registration artifact
+app/src/main/assets/adi-registration.properties
+
 # Native build artifacts
 **/.cxx/
 **/*.so
