@@ -130,7 +130,6 @@ class SettingsActivity : AppCompatActivity() {
         MaterialAlertDialogBuilder(this)
             .setIcon(R.drawable.ic_info)
             .setTitle(R.string.about_nin64)
-            .setMessage(R.string.about_links_prompt)
             .setItems(labels) { _, which ->
                 urls.getOrNull(which)?.let(::openAboutLink)
             }

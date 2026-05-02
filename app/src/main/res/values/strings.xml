@@ -93,7 +93,6 @@
     <string name="remove_ads">Remove ads</string>
     <string name="remove_ads_purchase_unavailable">The no-ads purchase will open here once Google Play Billing is connected.</string>
     <string name="about_nin64">About Nin64</string>
-    <string name="about_links_prompt">Choose a link to open.</string>
     <string name="about_link_unavailable">Could not open this link.</string>
     <string name="about_privacy_policy">Privacy Policy</string>
     <string name="about_source_code">Nin64 Source Code</string>

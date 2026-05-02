@@ -47,7 +47,7 @@ fun View.applyTopBarInsets() {
 
     ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
         val safeInsets = insets.getInsets(
-            WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.displayCutout()
+            WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
         )
         view.updatePadding(
             left = initialPaddingLeft + safeInsets.left,
