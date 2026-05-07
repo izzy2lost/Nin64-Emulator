@@ -3,7 +3,9 @@ package com.izzy2lost.nin64
 import android.content.Context
 import android.net.Uri
 import java.io.File
+import java.io.FileNotFoundException
 import java.net.URL
+import java.util.concurrent.Executors
 
 /**
  * Caches the cover-art index from the GitHub repo (one .png filename per line) and
@@ -22,39 +24,90 @@ internal object CoverMatcher {
     private const val KEY_TS = "ts"
     private const val TTL_MS = 24L * 3600_000
     private const val COVER_CACHE_DIR = "cover_art"
+    private const val KEY_NOT_FOUND_PREFIX = "not_found_"
+    private const val NOT_FOUND_RETRY_MS = 7L * 24 * 3600_000
 
     @Volatile private var normToFile: Map<String, String> = emptyMap()
     @Volatile private var ready = false
+    @Volatile private var indexRefreshInFlight = false
     private val inFlightDownloads = mutableSetOf<String>()
+    private val resolutionCache = mutableMapOf<String, String?>()
+    private val coverDownloadExecutor = Executors.newFixedThreadPool(3) { runnable ->
+        Thread(runnable, "Nin64-CoverCache").apply { isDaemon = true }
+    }
 
     fun init(context: Context, indexUrl: String, onReady: (() -> Unit)? = null) {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val appContext = context.applicationContext
+        val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val cached = prefs.getString(KEY_DATA, null)
         val age = System.currentTimeMillis() - prefs.getLong(KEY_TS, 0)
 
-        if (cached != null) {
-            normToFile = buildIndex(cached)
-            ready = true
+        if (ready) {
             onReady?.invoke()
+            if (cached == null || age > TTL_MS) {
+                refreshIndexAsync(appContext, indexUrl, onReady)
+            }
+            return
         }
 
-        if (cached == null || age > TTL_MS) {
+        if (cached != null) {
             Thread {
-                try {
-                    val text = java.net.URL(indexUrl).readText()
-                    if (text.isNotBlank()) {
-                        prefs.edit()
-                            .putString(KEY_DATA, text)
-                            .putLong(KEY_TS, System.currentTimeMillis())
-                            .apply()
-                        normToFile = buildIndex(text)
-                        ready = true
-                        onReady?.invoke()
-                    }
-                } catch (_: Exception) {
+                updateIndex(cached)
+                onReady?.invoke()
+                if (age > TTL_MS) {
+                    refreshIndex(appContext, indexUrl, onReady)
                 }
-            }.start()
+            }.apply {
+                name = "Nin64-CoverIndex"
+                start()
+            }
+        } else {
+            refreshIndexAsync(appContext, indexUrl, onReady)
         }
+    }
+
+    fun isReady(): Boolean = ready
+
+    private fun refreshIndexAsync(context: Context, indexUrl: String, onReady: (() -> Unit)?) {
+        synchronized(this) {
+            if (indexRefreshInFlight) return
+            indexRefreshInFlight = true
+        }
+
+        Thread {
+            try {
+                refreshIndex(context, indexUrl, onReady)
+            } finally {
+                indexRefreshInFlight = false
+            }
+        }.apply {
+            name = "Nin64-CoverIndex"
+            start()
+        }
+    }
+
+    private fun refreshIndex(context: Context, indexUrl: String, onReady: (() -> Unit)?) {
+        try {
+            val text = URL(indexUrl).readText()
+            if (text.isNotBlank()) {
+                context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_DATA, text)
+                    .putLong(KEY_TS, System.currentTimeMillis())
+                    .apply()
+                updateIndex(text)
+                onReady?.invoke()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun updateIndex(text: String) {
+        normToFile = buildIndex(text)
+        synchronized(resolutionCache) {
+            resolutionCache.clear()
+        }
+        ready = true
     }
 
     /** Best-matching cover filename for the ROM, or null if none. */
@@ -71,6 +124,21 @@ internal object CoverMatcher {
             .distinct()
         if (normNames.isEmpty()) return null
 
+        val cacheKey = normNames.joinToString(separator = "\u0001")
+        synchronized(resolutionCache) {
+            if (resolutionCache.containsKey(cacheKey)) {
+                return resolutionCache[cacheKey]
+            }
+        }
+
+        val resolved = resolveNormalized(normNames)
+        synchronized(resolutionCache) {
+            resolutionCache[cacheKey] = resolved
+        }
+        return resolved
+    }
+
+    private fun resolveNormalized(normNames: List<String>): String? {
         for (normRom in normNames) {
             normToFile[normRom]?.let { return it }
         }
@@ -94,72 +162,91 @@ internal object CoverMatcher {
             ?.first
     }
 
-    fun coverSource(
+    fun cachedCoverOrQueueDownload(
         context: Context,
         coverFileName: String,
         baseUrl: String,
         onCached: (() -> Unit)? = null,
-    ): Any {
-        val cachedFile = cachedCoverFile(context, coverFileName)
+    ): File? {
+        val appContext = context.applicationContext
+        val cachedFile = cachedCoverFile(appContext, coverFileName)
         if (cachedFile != null) return cachedFile
 
-        val url = remoteCoverUrl(baseUrl, coverFileName)
-        cacheCoverAsync(context.applicationContext, coverFileName, url, onCached)
-        return url
+        queueCoverDownload(appContext, coverFileName, baseUrl, onCached)
+        return null
     }
 
-    private fun cachedCoverFile(context: Context, coverFileName: String): File? {
+    fun prefetchCovers(
+        context: Context,
+        coverFileNames: Iterable<String>,
+        baseUrl: String,
+        onCached: (() -> Unit)? = null,
+    ) {
+        val appContext = context.applicationContext
+        coverFileNames
+            .filter { it.isNotBlank() }
+            .distinct()
+            .forEach { coverFileName ->
+                if (cachedCoverFile(appContext, coverFileName) == null) {
+                    queueCoverDownload(appContext, coverFileName, baseUrl, onCached)
+                }
+            }
+    }
+
+    fun cachedCoverFile(context: Context, coverFileName: String): File? {
         val file = coverFileFor(context, coverFileName)
         return file.takeIf { it.isFile && it.length() > 0L }
     }
 
-    private fun cacheCoverAsync(
+    private fun queueCoverDownload(
         context: Context,
         coverFileName: String,
-        url: String,
+        baseUrl: String,
         onCached: (() -> Unit)?,
     ) {
+        if (wasRecentlyNotFound(context, coverFileName)) return
+
         synchronized(inFlightDownloads) {
             if (!inFlightDownloads.add(coverFileName)) return
         }
 
-        Thread {
+        coverDownloadExecutor.execute {
             try {
                 val target = coverFileFor(context, coverFileName)
-                if (target.isFile && target.length() > 0L) return@Thread
-
-                target.parentFile?.mkdirs()
-                val temp = File.createTempFile("cover-", ".tmp", target.parentFile)
-                try {
-                    val connection = URL(url).openConnection().apply {
-                        connectTimeout = 8_000
-                        readTimeout = 15_000
-                    }
-                    connection.getInputStream().use { input ->
-                        temp.outputStream().use { output ->
-                            input.copyTo(output)
+                if (!(target.isFile && target.length() > 0L)) {
+                    target.parentFile?.mkdirs()
+                    val temp = File.createTempFile("cover-", ".tmp", target.parentFile)
+                    try {
+                        val connection = URL(remoteCoverUrl(baseUrl, coverFileName)).openConnection().apply {
+                            connectTimeout = 8_000
+                            readTimeout = 15_000
                         }
-                    }
-                    if (temp.length() > 0L) {
-                        if (target.exists()) target.delete()
-                        if (!temp.renameTo(target)) {
-                            temp.copyTo(target, overwrite = true)
-                            temp.delete()
+                        connection.getInputStream().use { input ->
+                            temp.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
                         }
-                        onCached?.invoke()
+                        if (temp.length() > 0L) {
+                            if (target.exists()) target.delete()
+                            if (!temp.renameTo(target)) {
+                                temp.copyTo(target, overwrite = true)
+                                temp.delete()
+                            }
+                            clearNotFound(context, coverFileName)
+                            onCached?.invoke()
+                        }
+                    } finally {
+                        temp.delete()
                     }
-                } finally {
-                    temp.delete()
                 }
+            } catch (_: FileNotFoundException) {
+                markNotFound(context, coverFileName)
             } catch (_: Exception) {
             } finally {
                 synchronized(inFlightDownloads) {
                     inFlightDownloads.remove(coverFileName)
                 }
             }
-        }.apply {
-            name = "Nin64-CoverCache"
-            start()
         }
     }
 
@@ -207,6 +294,29 @@ internal object CoverMatcher {
 
     private fun remoteCoverUrl(baseUrl: String, coverFileName: String): String =
         "$baseUrl/${Uri.encode(coverFileName)}"
+
+    private fun wasRecentlyNotFound(context: Context, coverFileName: String): Boolean {
+        val notFoundAt = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getLong(notFoundKey(coverFileName), 0L)
+        return notFoundAt > 0L && System.currentTimeMillis() - notFoundAt < NOT_FOUND_RETRY_MS
+    }
+
+    private fun markNotFound(context: Context, coverFileName: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(notFoundKey(coverFileName), System.currentTimeMillis())
+            .apply()
+    }
+
+    private fun clearNotFound(context: Context, coverFileName: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .remove(notFoundKey(coverFileName))
+            .apply()
+    }
+
+    private fun notFoundKey(coverFileName: String): String =
+        "$KEY_NOT_FOUND_PREFIX${safeCacheName(coverFileName)}"
 
     private fun safeCacheName(coverFileName: String): String {
         val safeName = coverFileName.replace(Regex("[^A-Za-z0-9._-]"), "_")

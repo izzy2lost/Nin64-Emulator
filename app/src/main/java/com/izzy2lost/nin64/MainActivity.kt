@@ -21,6 +21,7 @@ import android.widget.Toast
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import coil.dispose
 import coil.load
 import androidx.core.content.ContextCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
@@ -52,6 +53,8 @@ class MainActivity : AppCompatActivity() {
     private val romEntries = mutableListOf<RomEntry>()
     private var viewMode: String = VIEW_MODE_LIST
     private var pendingTexturePackEntry: RomEntry? = null
+    @Volatile private var coverWarmupGeneration = 0
+    private var coverRefreshQueued = false
     private val nativeAdPlacement by lazy { NativeAdPlacement(this) }
 
     private val prefs by lazy {
@@ -109,7 +112,8 @@ class MainActivity : AppCompatActivity() {
         RomDatabase.init(this, File(preferredRootDir(), "Mupen64plus/mupen64plus.ini"))
         CoverMatcher.init(this, "$COVER_BASE_URL/index.txt") {
             runOnUiThread {
-                romRecyclerView.adapter?.notifyDataSetChanged()
+                scheduleCoverRefresh()
+                warmCoverCache(romEntries.toList())
             }
         }
 
@@ -215,6 +219,7 @@ class MainActivity : AppCompatActivity() {
                     romRecyclerView.adapter?.notifyDataSetChanged()
                     updateGamesHeader(roms.size)
                     emptyRomListText.visibility = if (roms.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
+                    warmCoverCache(roms)
                 }.onFailure { error ->
                     romEntries.clear()
                     romRecyclerView.adapter?.notifyDataSetChanged()
@@ -225,6 +230,35 @@ class MainActivity : AppCompatActivity() {
                 updateEmptyState()
             }
         }.start()
+    }
+
+    private fun warmCoverCache(roms: List<RomEntry>) {
+        if (!CoverMatcher.isReady() || roms.isEmpty()) return
+
+        val generation = ++coverWarmupGeneration
+        val appContext = applicationContext
+        Thread {
+            val coverFileNames = roms
+                .mapNotNull(::coverFileNameFor)
+                .distinct()
+            if (generation == coverWarmupGeneration && coverFileNames.isNotEmpty()) {
+                CoverMatcher.prefetchCovers(appContext, coverFileNames, COVER_BASE_URL) {
+                    runOnUiThread { scheduleCoverRefresh() }
+                }
+            }
+        }.apply {
+            name = "Nin64-CoverWarmup"
+            start()
+        }
+    }
+
+    private fun scheduleCoverRefresh() {
+        if (coverRefreshQueued) return
+        coverRefreshQueued = true
+        romRecyclerView.postDelayed({
+            coverRefreshQueued = false
+            romRecyclerView.adapter?.notifyDataSetChanged()
+        }, 250L)
     }
 
     private fun updateEmptyState() {
@@ -924,6 +958,14 @@ class MainActivity : AppCompatActivity() {
     private fun archiveFileName(path: String): String =
         path.replace('\\', '/').substringAfterLast('/')
 
+    private fun coverFileNameFor(entry: RomEntry): String? {
+        CoverMatcher.resolve(entry.coverCandidates())?.let { return it }
+        if (!CoverMatcher.isReady()) return null
+
+        val stem = entry.fileName.substringBeforeLast('.', entry.fileName).trim()
+        return stem.takeIf { it.isNotEmpty() }?.let { "$it.png" }
+    }
+
     private val Int.dp: Int get() = (this * resources.displayMetrics.density).roundToInt()
 
     private inner class ListAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
@@ -1039,23 +1081,28 @@ class MainActivity : AppCompatActivity() {
             val entry = romEntries[position]
             holder.fallback.text = entry.cleanDisplayName()
 
-            val stem = entry.fileName.substringBeforeLast('.', entry.fileName)
-            val coverFile = CoverMatcher.resolve(entry.coverCandidates()) ?: "$stem.png"
-            val coverSource = CoverMatcher.coverSource(this@MainActivity, coverFile, COVER_BASE_URL) {
-                runOnUiThread {
-                    romRecyclerView.adapter?.notifyDataSetChanged()
+            val coverFile = coverFileNameFor(entry)
+            val cachedCover = coverFile?.let {
+                CoverMatcher.cachedCoverOrQueueDownload(this@MainActivity, it, COVER_BASE_URL) {
+                    runOnUiThread { scheduleCoverRefresh() }
                 }
             }
 
-            holder.fallback.visibility = View.VISIBLE
-            holder.cover.load(coverSource) {
-                crossfade(true)
-                placeholder(R.drawable.logo)
-                error(R.drawable.logo)
-                listener(
-                    onSuccess = { _, _ -> holder.fallback.visibility = View.GONE },
-                    onError = { _, _ -> holder.fallback.visibility = View.VISIBLE },
-                )
+            if (cachedCover != null) {
+                holder.fallback.visibility = View.VISIBLE
+                holder.cover.load(cachedCover) {
+                    crossfade(true)
+                    placeholder(R.drawable.logo)
+                    error(R.drawable.logo)
+                    listener(
+                        onSuccess = { _, _ -> holder.fallback.visibility = View.GONE },
+                        onError = { _, _ -> holder.fallback.visibility = View.VISIBLE },
+                    )
+                }
+            } else {
+                holder.cover.dispose()
+                holder.cover.setImageResource(R.drawable.logo)
+                holder.fallback.visibility = View.VISIBLE
             }
 
             holder.itemView.setOnClickListener {
@@ -1079,6 +1126,8 @@ class MainActivity : AppCompatActivity() {
         override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
             if (holder is NativeAdFooterViewHolder) {
                 holder.container.removeAllViews()
+            } else if (holder is RomViewHolder) {
+                holder.cover.dispose()
             }
             super.onViewRecycled(holder)
         }
