@@ -19,6 +19,7 @@
     <string name="copy_rom_failed">Could not copy %1$s into the app boot cache.</string>
     <string name="debug_boot_missing">The requested debug boot ROM path does not exist:\n%1$s</string>
     <string name="game_options_play">Play</string>
+    <string name="game_options_load_save">Load Save</string>
     <string name="game_options_add_texture_pack">Add Texture Pack</string>
     <string name="game_options_replace_texture_pack">Replace Texture Pack</string>
     <string name="game_options_enable_texture_pack">Enable Texture Pack</string>
@@ -30,6 +31,7 @@
     <string name="game_options_configure_controls">Configure Controls</string>
     <string name="game_options_dialog_header">Per-game options</string>
     <string name="game_options_play_summary">Start this game</string>
+    <string name="game_options_load_save_summary">Choose a save state and start from it</string>
     <string name="game_options_texture_pack_add_summary">Import a texture pack</string>
     <string name="game_options_texture_pack_replace_summary">Swap the current texture pack</string>
     <string name="game_options_texture_pack_enabled_summary">Currently enabled</string>
@@ -115,6 +117,7 @@
     <string name="in_game_state_loaded">State loaded.</string>
     <string name="in_game_no_save_state">No save state yet.</string>
     <string name="in_game_save_state_available">Save state available.</string>
+    <string name="save_state_slot_label">Slot %1$d</string>
     <string name="in_game_state_thumbnail">Save state thumbnail</string>
     <string name="done">Done</string>
     <!-- Compat strings still used in code -->

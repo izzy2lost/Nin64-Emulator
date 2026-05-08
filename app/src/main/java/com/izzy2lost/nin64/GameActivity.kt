@@ -53,6 +53,9 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private var menuOverlay: View? = null
     private var currentSlot = 1
     private var lastInGameSaveFlushTimeMs = 0L
+    private var pendingLaunchStateSlot = NO_LOAD_STATE_SLOT
+    private var launchStateLoadAttempts = 0
+    private var launchStateFramesUntilNextAttempt = 0
 
     @Volatile private var running = false
     @Volatile private var paused = false
@@ -75,6 +78,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private val disableExpansionPak: Boolean get() = intent.getBooleanExtra(EXTRA_DISABLE_EXPANSION_PAK, false)
     private val romPreferenceKey: String? get() = intent.getStringExtra(EXTRA_ROM_PREFERENCE_KEY)
     private val romCrc: String? get() = intent.getStringExtra(EXTRA_ROM_CRC)
+    private val launchStateSlot: Int get() = intent.getIntExtra(EXTRA_LOAD_STATE_SLOT, NO_LOAD_STATE_SLOT)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -258,6 +262,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
                 lastInGameSaveFlushTimeMs = System.currentTimeMillis()
                 applyEnabledCheats()
+                scheduleLaunchStateLoadIfNeeded()
                 updateSurfaceLayoutForCurrentFrame()
                 emulationLoop()
             } finally {
@@ -315,6 +320,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
             runPendingEmulationTasks()
             if (paused) { Thread.sleep(16); continue }
             NativeBridge.runFrame(OPS_PER_CHUNK)
+            maybeLoadLaunchStateAfterFrame()
             maybeFlushInGameSave()
         }
     }
@@ -602,6 +608,50 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         }
     }
 
+    private fun scheduleLaunchStateLoadIfNeeded() {
+        val slot = launchStateSlot
+        if (slot !in 1..SaveStateFiles.SAVE_SLOT_COUNT) return
+
+        currentSlot = slot
+        val stateFile = stateFile(slot)
+        if (!stateFile.isFile) {
+            runOnUiThread {
+                Toast.makeText(this, R.string.in_game_no_save_state, Toast.LENGTH_LONG).show()
+            }
+            return
+        }
+
+        pendingLaunchStateSlot = slot
+        launchStateLoadAttempts = 0
+        launchStateFramesUntilNextAttempt = LAUNCH_STATE_INITIAL_DELAY_FRAMES
+    }
+
+    private fun maybeLoadLaunchStateAfterFrame() {
+        val slot = pendingLaunchStateSlot
+        if (slot !in 1..SaveStateFiles.SAVE_SLOT_COUNT) return
+
+        if (launchStateFramesUntilNextAttempt > 0) {
+            launchStateFramesUntilNextAttempt--
+            return
+        }
+
+        val result = NativeBridge.loadState(stateFile(slot).absolutePath)
+        if (result == "loaded") {
+            pendingLaunchStateSlot = NO_LOAD_STATE_SLOT
+            return
+        }
+
+        launchStateLoadAttempts++
+        if (launchStateLoadAttempts >= LAUNCH_STATE_LOAD_ATTEMPTS) {
+            pendingLaunchStateSlot = NO_LOAD_STATE_SLOT
+            runOnUiThread {
+                Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+            }
+        } else {
+            launchStateFramesUntilNextAttempt = LAUNCH_STATE_RETRY_DELAY_FRAMES
+        }
+    }
+
     private fun captureStateThumbnail(target: File, callback: (Boolean) -> Unit) {
         val width = surfaceView.width
         val height = surfaceView.height
@@ -675,7 +725,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
         val slotContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-        for (slot in 1..SAVE_SLOT_COUNT) {
+        for (slot in 1..SaveStateFiles.SAVE_SLOT_COUNT) {
             val thumbFile = stateThumbnailFile(slot)
             val hasState = stateFile(slot).isFile
 
@@ -744,7 +794,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
             row.addView(actionBtn, LinearLayout.LayoutParams(wc, wc))
             slotContainer.addView(row, LinearLayout.LayoutParams(mp, wc))
 
-            if (slot < SAVE_SLOT_COUNT) {
+            if (slot < SaveStateFiles.SAVE_SLOT_COUNT) {
                 slotContainer.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(mp, 1))
             }
         }
@@ -803,21 +853,12 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     }
 
     private fun stateFile(slot: Int = currentSlot): File =
-        File(stateDirectory(), "${stateBaseName()}_slot${slot}.state")
+        SaveStateFiles.stateFile(rootPath, filesDir, romPreferenceKey, romPath, slot)
 
     private fun stateThumbnailFile(slot: Int = currentSlot): File =
-        File(stateDirectory(), "${stateBaseName()}_slot${slot}.png")
+        SaveStateFiles.thumbnailFile(rootPath, filesDir, romPreferenceKey, romPath, slot)
 
-    private fun stateDirectory(): File =
-        File(rootPath.ifBlank { filesDir.absolutePath }, "Mupen64plus/states").apply { mkdirs() }
-
-    private fun stateBaseName(): String {
-        val raw = romPreferenceKey ?: File(romPath).nameWithoutExtension.ifBlank { "game" }
-        val safe = raw.replace(Regex("[^A-Za-z0-9._-]"), "_").trim('_').take(96)
-        return safe.ifBlank { "game" }
-    }
-
-    private fun inGameSaveKey(): String = stateBaseName()
+    private fun inGameSaveKey(): String = SaveStateFiles.stateBaseName(romPreferenceKey, romPath)
 
     private val Int.dp: Int get() = (this * resources.displayMetrics.density).roundToInt()
 
@@ -844,11 +885,15 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         private const val EXTRA_DISABLE_EXPANSION_PAK = "extra_disable_expansion_pak"
         private const val EXTRA_ROM_PREFERENCE_KEY = "extra_rom_preference_key"
         private const val EXTRA_ROM_CRC = "extra_rom_crc"
+        private const val EXTRA_LOAD_STATE_SLOT = "extra_load_state_slot"
+        private const val NO_LOAD_STATE_SLOT = -1
         private const val OPS_PER_CHUNK = 2_000_000
         private const val IN_GAME_SAVE_FLUSH_INTERVAL_MS = 15_000L
         private const val STICK_MAX = 80
         private const val AXIS_BUTTON_THRESHOLD = 0.45f
-        private const val SAVE_SLOT_COUNT = 10
+        private const val LAUNCH_STATE_LOAD_ATTEMPTS = 4
+        private const val LAUNCH_STATE_INITIAL_DELAY_FRAMES = 180
+        private const val LAUNCH_STATE_RETRY_DELAY_FRAMES = 30
 
         fun launch(
             context: Context,
@@ -858,6 +903,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
             disableExpansionPak: Boolean = false,
             romPreferenceKey: String? = null,
             romCrc: String? = null,
+            loadStateSlot: Int = NO_LOAD_STATE_SLOT,
         ) {
             context.startActivity(
                 Intent(context, GameActivity::class.java)
@@ -867,6 +913,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
                     .putExtra(EXTRA_DISABLE_EXPANSION_PAK, disableExpansionPak)
                     .putExtra(EXTRA_ROM_PREFERENCE_KEY, romPreferenceKey)
                     .putExtra(EXTRA_ROM_CRC, romCrc)
+                    .putExtra(EXTRA_LOAD_STATE_SLOT, loadStateSlot)
             )
         }
     }

@@ -5,9 +5,11 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -345,7 +347,7 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun bootSelectedRom(entry: RomEntry) {
+    private fun bootSelectedRom(entry: RomEntry, loadStateSlot: Int = NO_LOAD_STATE_SLOT) {
         statusText.text = getString(R.string.booting_rom_status, entry.cleanDisplayName())
 
         Thread {
@@ -362,6 +364,7 @@ class MainActivity : AppCompatActivity() {
                         disableExpansionPak = options.disableExpansionPak,
                         romPreferenceKey = entry.preferenceKey(),
                         romCrc = entry.crc,
+                        loadStateSlot = loadStateSlot,
                     )
                 }
             } catch (t: Throwable) {
@@ -573,6 +576,14 @@ class MainActivity : AppCompatActivity() {
                 onSelected = { bootSelectedRom(entry) },
             ),
             GameOptionAction(
+                title = getString(R.string.game_options_load_save),
+                summary = getString(R.string.game_options_load_save_summary),
+                iconRes = R.drawable.ic_save,
+                containerColor = green,
+                iconTint = Color.WHITE,
+                onSelected = { showLoadSaveStateDialog(entry) },
+            ),
+            GameOptionAction(
                 title = getString(
                     if (hasTexturePack) {
                         R.string.game_options_replace_texture_pack
@@ -700,6 +711,88 @@ class MainActivity : AppCompatActivity() {
 
         dialog = MaterialAlertDialogBuilder(this)
             .setView(content)
+            .create()
+        dialog.setOnShowListener {
+            dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        }
+        dialog.show()
+    }
+
+    private fun showLoadSaveStateDialog(entry: RomEntry) {
+        val rootDir = preferredRootDir().also { it.mkdirs() }
+        val content = layoutInflater.inflate(R.layout.dialog_game_options, null)
+        content.findViewById<TextView>(R.id.gameOptionsHeader).text = getString(R.string.in_game_load_state)
+        content.findViewById<TextView>(R.id.gameOptionsTitle).text = entry.cleanDisplayName()
+
+        val list = content.findViewById<LinearLayout>(R.id.gameOptionsList)
+        var dialog: androidx.appcompat.app.AlertDialog? = null
+
+        for (slot in 1..SaveStateFiles.SAVE_SLOT_COUNT) {
+            val stateFile = SaveStateFiles.stateFile(rootDir.absolutePath, filesDir, entry.preferenceKey(), "", slot)
+            val thumbFile = SaveStateFiles.thumbnailFile(rootDir.absolutePath, filesDir, entry.preferenceKey(), "", slot)
+            val hasState = stateFile.isFile
+
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(14.dp, 10.dp, 14.dp, 10.dp)
+                minimumHeight = 76.dp
+                setBackgroundResource(R.drawable.bg_game_options_row)
+                isEnabled = hasState
+                alpha = if (hasState) 1f else 0.55f
+            }
+
+            val thumbView = ImageView(this).apply {
+                setBackgroundColor(Color.rgb(22, 23, 30))
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                val bitmap = if (thumbFile.isFile) BitmapFactory.decodeFile(thumbFile.absolutePath) else null
+                setImageBitmap(bitmap)
+                alpha = if (bitmap != null) 1f else 0.35f
+                contentDescription = getString(R.string.in_game_state_thumbnail)
+            }
+            row.addView(thumbView, LinearLayout.LayoutParams(96.dp, 60.dp).apply { marginEnd = 14.dp })
+
+            val textColumn = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            textColumn.addView(TextView(this).apply {
+                text = getString(R.string.save_state_slot_label, slot)
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.on_surface))
+                textSize = 16f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            })
+            textColumn.addView(TextView(this).apply {
+                text = getString(
+                    if (hasState) {
+                        R.string.in_game_save_state_available
+                    } else {
+                        R.string.in_game_no_save_state
+                    }
+                )
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.on_surface_muted))
+                textSize = 13f
+            })
+            row.addView(textColumn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+            if (hasState) {
+                row.isClickable = true
+                row.isFocusable = true
+                row.setOnClickListener {
+                    dialog?.dismiss()
+                    bootSelectedRom(entry, loadStateSlot = slot)
+                }
+            }
+
+            list.addView(row, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = 8.dp })
+        }
+
+        dialog = MaterialAlertDialogBuilder(this)
+            .setView(content)
+            .setNegativeButton(R.string.done, null)
             .create()
         dialog.setOnShowListener {
             dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
@@ -1185,6 +1278,7 @@ class MainActivity : AppCompatActivity() {
         private const val VIEW_MODE_GRID = "grid"
         private const val VIEW_TYPE_ROM = 0
         private const val VIEW_TYPE_NATIVE_AD = 1
+        private const val NO_LOAD_STATE_SLOT = -1
 
         private const val COVER_BASE_URL =
             "https://raw.githubusercontent.com/izzy2lost/n64_covers/main"
