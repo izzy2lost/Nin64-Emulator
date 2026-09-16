@@ -48,8 +48,21 @@ object AdsController {
         setAdsRemoved(context, removed)
     }
 
+    /**
+     * Ads may only be requested once the user still has ads enabled and the consent state
+     * gathered by [ConsentManager] allows it.
+     */
+    fun canRequestAds(context: Context): Boolean {
+        return areAdsEnabled(context) && ConsentManager.canRequestAds(context)
+    }
+
     fun initialize(context: Context, onInitialized: () -> Unit) {
         if (!areAdsEnabled(context)) {
+            return
+        }
+
+        if (!ConsentManager.canRequestAds(context)) {
+            Log.d(TAG, "Waiting for user consent before initializing the ads SDK.")
             return
         }
 

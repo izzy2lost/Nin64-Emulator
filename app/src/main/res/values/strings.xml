@@ -103,6 +103,10 @@
     <string name="remove_ads_purchase_cancelled">Purchase cancelled.</string>
     <string name="remove_ads_purchase_failed">Could not complete the purchase: %1$s</string>
     <string name="about_nin64">About Nin64</string>
+    <string name="settings_privacy_header">Privacy</string>
+    <string name="privacy_options">Privacy options</string>
+    <string name="privacy_options_description">Review or change the ad consent choices you made for this app.</string>
+    <string name="privacy_options_failed">Could not open privacy options: %1$s</string>
     <string name="about_link_unavailable">Could not open this link.</string>
     <string name="about_privacy_policy">Privacy Policy</string>
     <string name="about_source_code">Nin64 Source Code</string>

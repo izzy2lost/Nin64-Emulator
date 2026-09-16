@@ -30,6 +30,7 @@ class SettingsActivity : AppCompatActivity(), NoAdsPurchaseManager.Listener {
     private lateinit var folderPathText: TextView
     private lateinit var removeAdsButton: ImageButton
     private lateinit var settingsNativeAdContainer: FrameLayout
+    private lateinit var privacyOptionsRow: View
     private var removeAdsPurchaseBusy = false
 
     private val folderPicker = registerForActivityResult(
@@ -95,9 +96,15 @@ class SettingsActivity : AppCompatActivity(), NoAdsPurchaseManager.Listener {
             Toast.makeText(this, R.string.controls_global_reset_done, Toast.LENGTH_SHORT).show()
         }
 
+        privacyOptionsRow = findViewById(R.id.privacyOptionsRow)
+        findViewById<MaterialButton>(R.id.privacyOptionsButton).setOnClickListener {
+            showPrivacyOptions()
+        }
+
         updateFolderDisplay()
         settingsNativeAdContainer = findViewById(R.id.settingsNativeAdContainer)
         updateRemoveAdsUi()
+        updatePrivacyOptionsUi()
         nativeAdPlacement.loadInto(settingsNativeAdContainer)
     }
 
@@ -112,6 +119,7 @@ class SettingsActivity : AppCompatActivity(), NoAdsPurchaseManager.Listener {
         NoAdsPurchaseManager.refreshEntitlement(this) {
             updateRemoveAdsUi()
         }
+        updatePrivacyOptionsUi()
     }
 
     override fun onStop() {
@@ -246,6 +254,31 @@ class SettingsActivity : AppCompatActivity(), NoAdsPurchaseManager.Listener {
             nativeAdPlacement.destroy()
             settingsNativeAdContainer.removeAllViews()
             settingsNativeAdContainer.visibility = View.GONE
+        }
+    }
+
+    private fun showPrivacyOptions() {
+        ConsentManager.showPrivacyOptionsForm(this) { formError ->
+            if (isFinishing || isDestroyed) return@showPrivacyOptionsForm
+
+            if (formError != null) {
+                Toast.makeText(
+                    this,
+                    getString(R.string.privacy_options_failed, formError.message),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+            updatePrivacyOptionsUi()
+        }
+    }
+
+    private fun updatePrivacyOptionsUi() {
+        if (!::privacyOptionsRow.isInitialized) return
+
+        privacyOptionsRow.visibility = if (ConsentManager.isPrivacyOptionsRequired(this)) {
+            View.VISIBLE
+        } else {
+            View.GONE
         }
     }
 

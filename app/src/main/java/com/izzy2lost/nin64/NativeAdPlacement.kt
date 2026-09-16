@@ -30,7 +30,7 @@ class NativeAdPlacement(
         onLoaded: () -> Unit = {},
         onFailed: () -> Unit = {},
     ) {
-        if (!AdsController.areAdsEnabled(activity) || loadRequested || activity.isFinishing || activity.isDestroyed) {
+        if (!AdsController.canRequestAds(activity) || loadRequested || activity.isFinishing || activity.isDestroyed) {
             return
         }
 

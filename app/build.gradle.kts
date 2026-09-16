@@ -143,6 +143,7 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("io.coil-kt:coil:2.6.0")
     implementation("com.google.android.libraries.ads.mobile.sdk:ads-mobile-sdk:1.0.1")
+    implementation("com.google.android.ump:user-messaging-platform:4.0.0")
     implementation("com.android.billingclient:billing:9.0.0")
     implementation("org.apache.commons:commons-compress:1.28.0")
     implementation("org.tukaani:xz:1.10")

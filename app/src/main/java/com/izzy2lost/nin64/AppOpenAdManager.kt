@@ -21,7 +21,7 @@ object AppOpenAdManager {
     private var loadTimeMs = 0L
 
     fun loadAd(context: Context) {
-        if (!AdsController.areAdsEnabled(context) || isLoadingAd || isAdAvailable()) {
+        if (!AdsController.canRequestAds(context) || isLoadingAd || isAdAvailable()) {
             return
         }
 

@@ -143,6 +143,14 @@ class MainActivity : AppCompatActivity() {
 
         updateEmptyState()
 
+        if (savedInstanceState == null) {
+            ConsentManager.gatherConsent(this) { canRequestAds ->
+                if (canRequestAds) {
+                    AppOpenAdManager.loadAd(this)
+                }
+            }
+        }
+
         if (intent.getStringExtra(EXTRA_BOOT_ROM_PATH) != null) {
             handleBootIntent()
         }
