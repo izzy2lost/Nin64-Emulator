@@ -2081,15 +2081,36 @@ static int bridge_load_state_from_path(const char *path)
 
 static void bridge_shutdown(void)
 {
+    /*
+     * The core finishes its video teardown inside retro_unload_game() and
+     * retro_deinit(): those run M64CMD_STOP/M64CMD_ROM_CLOSE, which shuts the
+     * GLideN64 plugin down, deletes its GL objects and queries GL strings such
+     * as GL_RENDERER while saving the shader cache. Those calls need a live,
+     * current context, so the EGL state is only torn down once the core has
+     * been fully deinitialized.
+     */
+    if (g_bridge.handle && !bridge_hw_ensure_ready()) {
+        bridge_log(
+            RETRO_LOG_WARN,
+            "No current GL context for core teardown: %s",
+            g_bridge.last_error[0] ? g_bridge.last_error : "unknown error");
+    }
+
     bridge_unload_game();
-    bridge_hw_destroy_context(1);
+
+    if (g_bridge.handle && g_bridge.core_initialized) {
+        g_bridge.retro_deinit();
+        g_bridge.core_initialized = 0;
+    }
+
+    /*
+     * The core is deinitialized by this point, so it must not be called back
+     * into; its GL objects went away with the plugin shutdown above.
+     */
+    bridge_hw_destroy_context(0);
     bridge_hw_clear_request_state();
 
     if (g_bridge.handle) {
-        if (g_bridge.core_initialized) {
-            g_bridge.retro_deinit();
-            g_bridge.core_initialized = 0;
-        }
         dlclose(g_bridge.handle);
         g_bridge.handle = NULL;
     }
