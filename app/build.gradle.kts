@@ -2,7 +2,6 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 val releaseKeystorePropertiesFile = rootProject.file("keystore.properties")
@@ -85,8 +84,8 @@ android {
 
     sourceSets {
         getByName("main") {
-            jniLibs.srcDir("src/main/jniLibs")
-            assets.srcDir("${rootDir}/third_party/mupen64plus-libretro-nx/mupen64plus-core/data")
+            jniLibs.directories.add("src/main/jniLibs")
+            assets.directories.add("${rootDir}/third_party/mupen64plus-libretro-nx/mupen64plus-core/data")
         }
     }
 
