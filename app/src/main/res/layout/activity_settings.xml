@@ -160,6 +160,27 @@
                             app:iconTint="@color/brand_blue"
                             app:rippleColor="@color/brand_blue"
                             app:strokeColor="@color/brand_blue" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="@string/clear_unpacked_summary"
+                            android:textColor="@color/on_surface_muted"
+                            android:textSize="13sp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/clearUnpackedButton"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:text="@string/clear_unpacked"
+                            android:textColor="@color/brand_red"
+                            app:icon="@drawable/ic_delete"
+                            app:iconTint="@color/brand_red"
+                            app:rippleColor="@color/brand_red"
+                            app:strokeColor="@color/brand_red" />
                     </LinearLayout>
                 </LinearLayout>
 

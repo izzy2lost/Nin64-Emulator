@@ -324,5 +324,5 @@ internal object CoverMatcher {
         return safeName.ifBlank { "cover.$COVER_EXTENSION" }
     }
 
-    private val KNOWN_EXTENSIONS = setOf("z64", "n64", "v64", "rom", "bin", "png", "webp")
+    private val KNOWN_EXTENSIONS = setOf("z64", "n64", "v64", "rom", "bin", "zip", "png", "webp")
 }

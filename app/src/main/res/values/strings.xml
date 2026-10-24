@@ -7,6 +7,9 @@
     <string name="game_folder">Game Folder</string>
     <string name="game_folder_not_set">Not set</string>
     <string name="change_folder">Change Folder</string>
+    <string name="clear_unpacked">Clear Unpacked Games</string>
+    <string name="clear_unpacked_summary">Zipped games are unpacked once and kept so they load at full speed; this frees that space.</string>
+    <string name="clear_unpacked_done">Freed %1$d MB.</string>
     <string name="navigate_up">Back</string>
     <string name="switch_to_grid">Switch to grid view</string>
     <string name="switch_to_list">Switch to list view</string>

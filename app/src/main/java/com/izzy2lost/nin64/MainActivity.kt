@@ -259,7 +259,7 @@ class MainActivity : AppCompatActivity() {
             for (child in children) {
                 when {
                     child.isDirectory -> queue.addLast(child)
-                    child.isFile && isRomFile(child.name) -> roms += child.toRomEntry()
+                    child.isFile && isLibraryFile(child.name) -> child.toRomEntry()?.let { roms += it }
                 }
             }
         }
@@ -277,11 +277,36 @@ class MainActivity : AppCompatActivity() {
         return extension in ROM_EXTENSIONS
     }
 
-    private fun DocumentFile.toRomEntry(): RomEntry {
-        val fileName = name ?: getString(R.string.unknown_game_file)
+    private fun isLibraryFile(name: String?): Boolean =
+        isRomFile(name) || ZippedRoms.isZip(name)
+
+    private fun DocumentFile.toRomEntry(): RomEntry? =
+        romEntryFor(name ?: getString(R.string.unknown_game_file), documentUri = uri) {
+            contentResolver.openInputStream(uri)
+        }
+
+    private fun File.toRomEntry(): RomEntry? =
+        romEntryFor(name, localFile = this) { inputStream() }
+
+    private fun romEntryFor(
+        fileName: String,
+        localFile: File? = null,
+        documentUri: Uri? = null,
+        open: () -> java.io.InputStream?,
+    ): RomEntry? {
         val fallbackName = fileName.substringBeforeLast('.', fileName)
-        val identity = contentResolver.openInputStream(uri)?.use { input ->
-            RomIdentityReader.read(input, fallbackName)
+        var zipEntryName: String? = null
+        val identity = open()?.use { input ->
+            if (ZippedRoms.isZip(fileName)) {
+                // A zip with no N64 game inside is somebody else's archive.
+                ZipInputStream(input.buffered()).use { zip ->
+                    val rom = ZippedRoms.seekRom(zip, ::isRomFile) ?: return null
+                    zipEntryName = rom.name
+                    RomIdentityReader.read(zip, fallbackName)
+                }
+            } else {
+                RomIdentityReader.read(input, fallbackName)
+            }
         }
         val databaseName = identity?.let(RomDatabase::goodNameFor)
         val displayName = databaseName ?: identity?.headerTitle ?: fallbackName
@@ -294,28 +319,9 @@ class MainActivity : AppCompatActivity() {
             md5 = identity?.md5,
             crc = identity?.crc,
             databaseName = databaseName,
-            documentUri = uri,
-        )
-    }
-
-    private fun File.toRomEntry(): RomEntry {
-        val fileName = name
-        val fallbackName = fileName.substringBeforeLast('.', fileName)
-        val identity = inputStream().use { input ->
-            RomIdentityReader.read(input, fallbackName)
-        }
-        val databaseName = RomDatabase.goodNameFor(identity)
-        val displayName = databaseName ?: identity.headerTitle
-
-        return RomEntry(
-            displayName = displayName,
-            fileName = fileName,
-            fallbackName = fallbackName,
-            headerTitle = identity.headerTitle,
-            md5 = identity.md5,
-            crc = identity.crc,
-            databaseName = databaseName,
-            localFile = this,
+            localFile = localFile,
+            documentUri = documentUri,
+            zipEntryName = zipEntryName,
         )
     }
 
@@ -347,6 +353,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun prepareRomForBoot(entry: RomEntry): File {
+        entry.zipEntryName?.let { zipEntryName ->
+            return ZippedRoms.unpack(this, entry.preferenceKey(), zipEntryName) {
+                entry.localFile?.inputStream() ?: entry.documentUri?.let(contentResolver::openInputStream)
+            }
+        }
         entry.localFile?.let { return it }
 
         val documentUri = entry.documentUri
@@ -408,7 +419,8 @@ class MainActivity : AppCompatActivity() {
         val romFile = File(bootRomPath)
 
         when {
-            romFile.canRead() -> bootSelectedRom(romFile.toRomEntry())
+            romFile.canRead() -> romFile.toRomEntry()?.let { bootSelectedRom(it) }
+                ?: run { statusText.text = getString(R.string.debug_boot_missing, bootRomPath) }
             else -> {
                 val resolvedEntry = resolveBootIntentEntry(bootRomPath)
                 if (resolvedEntry != null) {
@@ -428,7 +440,7 @@ class MainActivity : AppCompatActivity() {
             ?: findDocumentByFileName(treeRoot, File(bootRomPath).name)
 
         return matchedDocument
-            ?.takeIf { it.isFile && isRomFile(it.name) }
+            ?.takeIf { it.isFile && isLibraryFile(it.name) }
             ?.toRomEntry()
     }
 
@@ -1177,6 +1189,7 @@ class MainActivity : AppCompatActivity() {
         val databaseName: String? = null,
         val localFile: File? = null,
         val documentUri: Uri? = null,
+        val zipEntryName: String? = null,
     ) {
         fun coverCandidates(): List<String> =
             listOfNotNull(databaseName, displayName, cleanDisplayName(), fileName, fallbackName).distinct()

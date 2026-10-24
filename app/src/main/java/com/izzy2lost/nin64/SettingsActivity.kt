@@ -69,6 +69,10 @@ class SettingsActivity : AppCompatActivity(), NoAdsPurchaseManager.Listener {
             val current = prefs.getString(PREF_ROM_FOLDER_URI, null)?.let(Uri::parse)
             folderPicker.launch(current)
         }
+        findViewById<MaterialButton>(R.id.clearUnpackedButton).setOnClickListener {
+            val freed = ZippedRoms.clear(this)
+            Toast.makeText(this, getString(R.string.clear_unpacked_done, freed / (1024 * 1024)), Toast.LENGTH_SHORT).show()
+        }
 
         bindSpinner(
             spinnerId = R.id.aspectSpinner,
