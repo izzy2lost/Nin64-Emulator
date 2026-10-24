@@ -1085,7 +1085,7 @@ class MainActivity : AppCompatActivity() {
 
         inner class RomViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
             val cover: ImageView = itemView.findViewById(R.id.coverImage)
-            val fallback: TextView = itemView.findViewById(R.id.fallbackTitle)
+            val title: TextView = itemView.findViewById(R.id.gameTitle)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
@@ -1101,13 +1101,15 @@ class MainActivity : AppCompatActivity() {
             val spanCount = (rv.layoutManager as? GridLayoutManager)?.spanCount ?: gridSpanCount()
             val rvWidth = (rv.width - rv.paddingStart - rv.paddingEnd).takeIf { it > 0 }
                 ?: resources.displayMetrics.widthPixels
-            val cellHeight = (rvWidth / spanCount / 1.21f).toInt().coerceAtLeast(1)
+            val coverHeight = (rvWidth / spanCount / 1.21f).toInt().coerceAtLeast(1)
+            val titleHeight = holder.title.lineHeight * 2 + holder.title.paddingTop + holder.title.paddingBottom
             holder.itemView.layoutParams = holder.itemView.layoutParams.apply {
-                height = cellHeight
+                height = coverHeight + titleHeight
             }
 
             val entry = romEntries[position]
-            holder.fallback.text = entry.cleanDisplayName()
+            holder.title.text = entry.cleanDisplayName()
+            holder.cover.contentDescription = entry.cleanDisplayName()
 
             val coverFile = coverFileNameFor(entry)
             val cachedCover = coverFile?.let {
@@ -1117,20 +1119,14 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (cachedCover != null) {
-                holder.fallback.visibility = View.VISIBLE
                 holder.cover.load(cachedCover) {
                     crossfade(true)
                     placeholder(R.drawable.logo)
                     error(R.drawable.logo)
-                    listener(
-                        onSuccess = { _, _ -> holder.fallback.visibility = View.GONE },
-                        onError = { _, _ -> holder.fallback.visibility = View.VISIBLE },
-                    )
                 }
             } else {
                 holder.cover.dispose()
                 holder.cover.setImageResource(R.drawable.logo)
-                holder.fallback.visibility = View.VISIBLE
             }
 
             holder.itemView.setOnClickListener {
