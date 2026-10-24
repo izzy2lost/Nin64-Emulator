@@ -60,6 +60,7 @@
     <string name="expansion_pak_disabled">Expansion Pak disabled for %1$s.</string>
     <string name="expansion_pak_enabled">Expansion Pak enabled for %1$s.</string>
     <string name="scanning_games">Scanning for ROMs…</string>
+    <string name="scanning_games_progress">Reading games… %1$d of %2$d</string>
     <string name="games_found_status">Found %1$d game(s).</string>
     <string name="no_games_found_status">No ROM files found.</string>
     <!-- Settings: video -->

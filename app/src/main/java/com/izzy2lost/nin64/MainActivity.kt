@@ -30,6 +30,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.progressindicator.LinearProgressIndicator
 import org.apache.commons.compress.archivers.sevenz.SevenZFile
 import java.io.File
 import java.io.OutputStream
@@ -49,12 +50,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pickFolderButton: android.widget.Button
     private lateinit var emptyRomListText: TextView
     private lateinit var viewToggleButton: ImageButton
+    private lateinit var scanProgressGroup: View
+    private lateinit var scanProgressText: TextView
+    private lateinit var scanProgressBar: LinearProgressIndicator
     private lateinit var listAdapter: ListAdapter
     private lateinit var gridAdapter: GridAdapter
     private val romEntries = mutableListOf<RomEntry>()
     private var viewMode: String = VIEW_MODE_LIST
     private var pendingTexturePackEntry: RomEntry? = null
     @Volatile private var coverWarmupGeneration = 0
+    private val libraryCache by lazy { LibraryCache(File(filesDir, "library.json")) }
+    private var loadedFolderUri: Uri? = null
+    private var scanGeneration = 0
+    private var scanning = false
     private var coverRefreshQueued = false
 
     private val prefs by lazy {
@@ -105,6 +113,9 @@ class MainActivity : AppCompatActivity() {
         pickFolderButton = findViewById(R.id.pickFolderButton)
         emptyRomListText = findViewById(R.id.emptyRomListText)
         viewToggleButton = findViewById(R.id.viewToggleButton)
+        scanProgressGroup = findViewById(R.id.scanProgressGroup)
+        scanProgressText = findViewById(R.id.scanProgressText)
+        scanProgressBar = findViewById(R.id.scanProgressBar)
 
         listAdapter = ListAdapter()
         gridAdapter = GridAdapter()
@@ -159,7 +170,11 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateEmptyState()
-        loadAvailableRoms()
+        // The library is kept while the app runs: coming back from a game does not
+        // rescan it. A new folder (picked in Settings) does; pull to refresh for new files.
+        if (readSavedRomFolderUri() != loadedFolderUri) {
+            loadAvailableRoms()
+        }
     }
 
     private fun preferredRootDir(): File {
@@ -173,37 +188,70 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadAvailableRoms() {
-        val savedFolderUri = readSavedRomFolderUri()
-        updateRomFolderLabel(savedFolderUri)
+        val folderUri = readSavedRomFolderUri()
+        updateRomFolderLabel(folderUri)
         clearPreview()
 
+        val generation = ++scanGeneration
+        scanning = folderUri != null
+        if (folderUri != loadedFolderUri) {
+            loadedFolderUri = folderUri
+            // Show the last scan straight away; the rescan below only reads what changed.
+            showRoms(folderUri?.let { libraryCache.load(it).values.mapNotNull { scanned -> scanned.entry } }.orEmpty())
+        }
+        if (folderUri == null) {
+            swipeRefreshLayout.isRefreshing = false
+            updateEmptyState()
+            return
+        }
+
+        val incremental = romEntries.isEmpty()
         Thread {
             val result = runCatching {
-                if (savedFolderUri != null) {
-                    scanDocumentRomFolder(savedFolderUri)
-                } else {
-                    emptyList()
+                scanRomFolder(folderUri) { read, toRead, found ->
+                    runOnUiThread {
+                        if (generation != scanGeneration) return@runOnUiThread
+                        showScanProgress(read, toRead)
+                        if (incremental && found != null) showRoms(found)
+                    }
                 }
             }
 
             runOnUiThread {
+                if (generation != scanGeneration) return@runOnUiThread
+                scanning = false
+                scanProgressGroup.visibility = View.GONE
                 result.onSuccess { roms ->
-                    romEntries.clear()
-                    romEntries.addAll(roms)
-                    romRecyclerView.adapter?.notifyDataSetChanged()
-                    updateGamesHeader(roms.size)
-                    emptyRomListText.visibility = if (roms.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
+                    showRoms(roms)
                     warmCoverCache(roms)
                 }.onFailure { error ->
-                    romEntries.clear()
-                    romRecyclerView.adapter?.notifyDataSetChanged()
-                    updateGamesHeader(0)
+                    showRoms(emptyList())
                     statusText.text = error.stackTraceToString()
                 }
                 swipeRefreshLayout.isRefreshing = false
                 updateEmptyState()
             }
-        }.start()
+        }.apply {
+            name = "Nin64-LibraryScan"
+            start()
+        }
+    }
+
+    private fun showRoms(roms: List<RomEntry>) {
+        if (roms != romEntries) {
+            romEntries.clear()
+            romEntries.addAll(roms)
+            romRecyclerView.adapter?.notifyDataSetChanged()
+        }
+        updateGamesHeader(roms.size)
+        emptyRomListText.visibility = if (roms.isEmpty() && !scanning) View.VISIBLE else View.GONE
+    }
+
+    private fun showScanProgress(read: Int, toRead: Int) {
+        scanProgressGroup.visibility = View.VISIBLE
+        scanProgressText.text = getString(R.string.scanning_games_progress, read, toRead)
+        scanProgressBar.max = toRead
+        scanProgressBar.setProgressCompat(read, true)
     }
 
     private fun warmCoverCache(roms: List<RomEntry>) {
@@ -243,30 +291,88 @@ class MainActivity : AppCompatActivity() {
         swipeRefreshLayout.isEnabled = hasFolderConfigured
     }
 
-    private fun scanDocumentRomFolder(uri: Uri): List<RomEntry> {
-        val root = DocumentFile.fromTreeUri(this, uri)
-            ?: error(getString(R.string.invalid_rom_folder))
+    /**
+     * Lists the folder and reads only the files that are new or changed since the last
+     * scan. [onProgress] gets the files read so far out of those to read and, every few
+     * files, the games found so far.
+     */
+    private fun scanRomFolder(
+        folderUri: Uri,
+        onProgress: (read: Int, toRead: Int, found: List<RomEntry>?) -> Unit,
+    ): List<RomEntry> {
+        val cached = libraryCache.load(folderUri)
+        val files = listLibraryFiles(folderUri)
+        val toRead = files.count { file -> cached[file.uri.toString()]?.matches(file) != true }
+        if (toRead > 0) onProgress(0, toRead, null)
 
-        val queue = ArrayDeque<DocumentFile>()
-        val roms = mutableListOf<RomEntry>()
-        queue.add(root)
+        val scanned = mutableListOf<Pair<LibraryFile, RomEntry?>>()
+        var read = 0
+        var lastPublished = 0L
+        for (file in files) {
+            val hit = cached[file.uri.toString()]?.takeIf { it.matches(file) }
+            if (hit != null) {
+                scanned += file to hit.entry
+                continue
+            }
+            // A file that cannot be read is left out of the cache, so the next scan retries it.
+            runCatching {
+                romEntryFor(file.name, documentUri = file.uri) { contentResolver.openInputStream(file.uri) }
+            }.onSuccess { entry -> scanned += file to entry }
 
-        while (queue.isNotEmpty()) {
-            val current = queue.removeFirst()
-            val children = current.listFiles()
-                .sortedBy { document -> document.name?.lowercase().orEmpty() }
+            read++
+            val now = System.currentTimeMillis()
+            val publish = now - lastPublished > 500 || read == toRead
+            if (publish) lastPublished = now
+            onProgress(read, toRead, if (publish) scanned.mapNotNull { it.second } else null)
+        }
 
-            for (child in children) {
+        val withCovers = scanned.map { (file, entry) ->
+            file to entry?.let { it.copy(coverFile = coverFileNameFor(it) ?: it.coverFile) }
+        }
+        libraryCache.save(folderUri, withCovers)
+        return withCovers.mapNotNull { it.second }
+    }
+
+    /** Every game file under the tree, folder by folder in name order, from one query per folder. */
+    private fun listLibraryFiles(treeUri: Uri): List<LibraryFile> {
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+        )
+        val files = mutableListOf<LibraryFile>()
+        val folders = ArrayDeque<String>()
+        folders.add(DocumentsContract.getTreeDocumentId(treeUri))
+
+        while (folders.isNotEmpty()) {
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, folders.removeFirst())
+            val children = mutableListOf<Triple<String, String, Boolean>>()
+            val stamps = mutableMapOf<String, Pair<Long, Long>>()
+            contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val id = cursor.getString(0) ?: continue
+                    val name = cursor.getString(1) ?: continue
+                    val isFolder = cursor.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR
+                    children += Triple(id, name, isFolder)
+                    stamps[id] = (if (cursor.isNull(3)) -1L else cursor.getLong(3)) to
+                        (if (cursor.isNull(4)) -1L else cursor.getLong(4))
+                }
+            } ?: error(getString(R.string.invalid_rom_folder))
+
+            for ((id, name, isFolder) in children.sortedBy { it.second.lowercase() }) {
                 when {
-                    child.isDirectory -> queue.addLast(child)
-                    child.isFile && isLibraryFile(child.name) -> child.toRomEntry()?.let { roms += it }
+                    isFolder -> folders.addLast(id)
+                    isLibraryFile(name) -> {
+                        val (size, modified) = stamps.getValue(id)
+                        files += LibraryFile(DocumentsContract.buildDocumentUriUsingTree(treeUri, id), name, size, modified)
+                    }
                 }
             }
         }
-
-        return roms
+        return files
     }
-
 
     private fun isRomFile(name: String?): Boolean {
         val extension = name
@@ -1027,7 +1133,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun coverFileNameFor(entry: RomEntry): String? {
         CoverMatcher.resolve(entry.coverCandidates())?.let { return it }
-        if (!CoverMatcher.isReady()) return null
+        if (!CoverMatcher.isReady()) return entry.coverFile
 
         val stem = entry.fileName.substringBeforeLast('.', entry.fileName).trim()
         return stem.takeIf { it.isNotEmpty() }?.let { "$it.webp" }
@@ -1175,29 +1281,6 @@ class MainActivity : AppCompatActivity() {
         val sourceName: String,
     )
 
-    private data class RomEntry(
-        val displayName: String,
-        val fileName: String,
-        val fallbackName: String,
-        val headerTitle: String,
-        val md5: String? = null,
-        val crc: String? = null,
-        val databaseName: String? = null,
-        val localFile: File? = null,
-        val documentUri: Uri? = null,
-        val zipEntryName: String? = null,
-    ) {
-        fun coverCandidates(): List<String> =
-            listOfNotNull(databaseName, displayName, cleanDisplayName(), fileName, fallbackName).distinct()
-
-        fun preferenceKey(): String = md5 ?: crc ?: fileName
-
-        fun cleanDisplayName(): String =
-            cleanRomTitle(displayName).ifBlank { displayName }
-
-        fun listLabel(): String = cleanDisplayName()
-    }
-
     companion object {
         private const val PREFS_NAME = "nin64_prefs"
         private const val PREF_ROM_FOLDER_URI = "rom_folder_uri"
@@ -1213,15 +1296,5 @@ class MainActivity : AppCompatActivity() {
 
         private val ROM_EXTENSIONS = setOf("z64", "n64", "v64", "rom", "bin")
 
-        private fun cleanRomTitle(title: String): String {
-            val firstParen = title.indexOf('(').takeIf { it >= 0 } ?: title.length
-            val firstBracket = title.indexOf('[').takeIf { it >= 0 } ?: title.length
-            val markerIndex = minOf(firstParen, firstBracket)
-            return title
-                .take(markerIndex)
-                .trim()
-                .trimEnd('-', '.', '_')
-                .trim()
-        }
     }
 }
