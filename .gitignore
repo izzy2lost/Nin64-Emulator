@@ -18,6 +18,8 @@ app/src/main/assets/adi-registration.properties
 
 # Native build artifacts
 **/.cxx/
+third_party/mupen64plus-libretro-nx/libretro/obj/
+third_party/mupen64plus-libretro-nx/libretro/libs/
 **/*.so
 **/*.o
 **/*.a
