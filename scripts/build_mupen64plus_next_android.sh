@@ -68,7 +68,7 @@ compute_build_fingerprint() {
         if [[ -f "${NDK_SOURCE_PROPERTIES}" ]]; then
             sha256sum "${NDK_SOURCE_PROPERTIES}"
         fi
-        git -C "${REPO_ROOT}" ls-files -z -- "${CORE_ROOT_REL}" |
+        git -C "${REPO_ROOT}" ls-files -z --cached --others --exclude-standard -- "${CORE_ROOT_REL}" |
             sort -z |
             while IFS= read -r -d '' source_file; do
                 sha256sum "${REPO_ROOT}/${source_file}"
