@@ -22,6 +22,17 @@ object NativeBridge {
     external fun setFastForwardEnabled(enabled: Boolean)
     external fun setCheats(codeLines: Array<String>)
 
+    // Local multiplayer (see Netplay)
+    /** From the first lockstep frame: all four players take [netplaySetInputs], not the live controls. */
+    external fun netplayBegin(discardSaves: Boolean)
+    external fun netplayEnd()
+    /** The inputs for the frame about to run, identical on every device: one [Netplay.pack]ed int per player. */
+    external fun netplaySetInputs(packed: IntArray)
+    /** The cartridge/controller-pak save memory, as loaded at boot. */
+    external fun getSaveMemory(): ByteArray?
+    external fun setSaveMemory(data: ByteArray): Boolean
+    external fun memoryChecksum(): Int
+
     // RetroAchievements
     /** After [bootRomForPlay], on the emulation thread: signs in and loads the game's achievements in the background. */
     external fun cheevosBegin(user: String, token: String)

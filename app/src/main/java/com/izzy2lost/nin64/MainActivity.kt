@@ -13,9 +13,11 @@ import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.RelativeLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -151,6 +153,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.settingsButton).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+        findViewById<ImageButton>(R.id.joinMultiplayerButton).setOnClickListener { showJoinMultiplayer() }
 
         updateEmptyState()
 
@@ -431,7 +434,13 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun bootSelectedRom(entry: RomEntry, loadStateSlot: Int = NO_LOAD_STATE_SLOT) {
+    private fun bootSelectedRom(
+        entry: RomEntry,
+        loadStateSlot: Int = NO_LOAD_STATE_SLOT,
+        netplayRole: Int = GameActivity.NETPLAY_NONE,
+        netplayHost: String? = null,
+        netplayPort: Int = Netplay.SESSION_PORT,
+    ) {
         statusText.text = getString(R.string.booting_rom_status, entry.cleanDisplayName())
 
         Thread {
@@ -449,6 +458,11 @@ class MainActivity : AppCompatActivity() {
                         romPreferenceKey = entry.preferenceKey(),
                         romCrc = entry.crc,
                         loadStateSlot = loadStateSlot,
+                        netplayRole = netplayRole,
+                        netplayHost = netplayHost,
+                        netplayPort = netplayPort,
+                        romMd5 = entry.md5,
+                        gameTitle = entry.cleanDisplayName(),
                     )
                 }
             } catch (t: Throwable) {
@@ -663,6 +677,19 @@ class MainActivity : AppCompatActivity() {
                 iconTint = Color.WHITE,
                 onSelected = { showLoadSaveStateDialog(entry) },
             ),
+        )
+        // Players are matched by the ROM's md5, so a game without one cannot be hosted.
+        if (entry.md5 != null) {
+            actions += GameOptionAction(
+                title = getString(R.string.netplay_host_action),
+                summary = getString(R.string.netplay_host_summary),
+                iconRes = R.drawable.ic_multiplayer,
+                containerColor = blue,
+                iconTint = Color.WHITE,
+                onSelected = { bootSelectedRom(entry, netplayRole = GameActivity.NETPLAY_HOST) },
+            )
+        }
+        actions.addAll(listOf(
             GameOptionAction(
                 title = getString(
                     if (hasTexturePack) {
@@ -683,7 +710,7 @@ class MainActivity : AppCompatActivity() {
                 iconTint = Color.BLACK,
                 onSelected = { pickTexturePack(entry) },
             ),
-        )
+        ))
 
         if (hasTexturePack) {
             actions += GameOptionAction(
@@ -761,6 +788,65 @@ class MainActivity : AppCompatActivity() {
         )
 
         showGameOptionsDialog(entry, actions)
+    }
+
+    /** Lists games hosted on this Wi-Fi as they are found; picking one boots the same game from this library. */
+    private fun showJoinMultiplayer() {
+        val beacons = mutableListOf<Netplay.Beacon>()
+        val adapter = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, mutableListOf())
+        val wifi = Netplay.WifiLocks(this).also { it.acquire() }
+        var dialog: androidx.appcompat.app.AlertDialog? = null
+        val scanner = try {
+            Netplay.Scanner { found ->
+                runOnUiThread {
+                    beacons.clear()
+                    beacons.addAll(found)
+                    adapter.clear()
+                    adapter.addAll(found.map { getString(R.string.netplay_host_entry, it.title, it.device, it.players, Netplay.MAX_PLAYERS) })
+                    dialog?.setMessage(if (found.isEmpty()) getString(R.string.netplay_searching) else null)
+                }
+            }
+        } catch (e: Exception) {
+            wifi.release()
+            Toast.makeText(this, getString(R.string.netplay_join_failed, e.message), Toast.LENGTH_LONG).show()
+            return
+        }
+        val list = ListView(this).apply { this.adapter = adapter }
+        dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.netplay_join_title)
+            .setIcon(R.drawable.ic_multiplayer)
+            .setMessage(R.string.netplay_searching)
+            .setView(list)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        dialog.setOnDismissListener {
+            scanner.close()
+            wifi.release()
+        }
+        list.setOnItemClickListener { _, _, position, _ ->
+            val beacon = beacons.getOrNull(position) ?: return@setOnItemClickListener
+            dialog.dismiss()
+            joinMultiplayer(beacon)
+        }
+        dialog.show()
+    }
+
+    private fun joinMultiplayer(beacon: Netplay.Beacon) {
+        val entry = romEntries.firstOrNull { it.md5.equals(beacon.md5, ignoreCase = true) }
+        if (entry == null) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.netplay_join)
+                .setMessage(getString(R.string.netplay_missing_game, beacon.title))
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+            return
+        }
+        bootSelectedRom(
+            entry,
+            netplayRole = GameActivity.NETPLAY_GUEST,
+            netplayHost = beacon.address.hostAddress,
+            netplayPort = beacon.port,
+        )
     }
 
     private fun showGameOptionsDialog(entry: RomEntry, actions: List<GameOptionAction>) {

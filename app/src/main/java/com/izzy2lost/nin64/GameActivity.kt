@@ -33,6 +33,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
 import java.io.File
+import java.io.IOException
 import java.util.ArrayDeque
 import kotlin.math.abs
 import kotlin.math.min
@@ -72,6 +73,12 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private var startComboPressed = false
     private var selectComboPressed = false
     private var cheevoPopups: Achievements.Popups? = null
+    @Volatile private var netplayLink: Netplay.Session? = null
+    @Volatile private var netplayLobby: Netplay.HostLobby? = null
+    private var netplayWifi: Netplay.WifiLocks? = null
+    private var netplayStatusView: View? = null
+    private var netplayStallView: TextView? = null
+    private var netplayDesyncReported = false
     private val cheevoHandler = Handler(Looper.getMainLooper())
     private val cheevoPoll = object : Runnable {
         override fun run() {
@@ -87,6 +94,11 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private val romPreferenceKey: String? get() = intent.getStringExtra(EXTRA_ROM_PREFERENCE_KEY)
     private val romCrc: String? get() = intent.getStringExtra(EXTRA_ROM_CRC)
     private val launchStateSlot: Int get() = intent.getIntExtra(EXTRA_LOAD_STATE_SLOT, NO_LOAD_STATE_SLOT)
+    private val netplayRole: Int get() = intent.getIntExtra(EXTRA_NETPLAY_ROLE, NETPLAY_NONE)
+    private val netplayHost: String get() = intent.getStringExtra(EXTRA_NETPLAY_HOST) ?: ""
+    private val netplayPort: Int get() = intent.getIntExtra(EXTRA_NETPLAY_PORT, Netplay.SESSION_PORT)
+    private val romMd5: String get() = intent.getStringExtra(EXTRA_ROM_MD5) ?: ""
+    private val gameTitle: String get() = intent.getStringExtra(EXTRA_GAME_TITLE) ?: File(romPath).nameWithoutExtension
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -190,6 +202,11 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
         setContentView(rootContainer)
         cheevoPopups = Achievements.Popups(this, rootContainer)
+        if (netplayRole != NETPLAY_NONE) {
+            // No fast forward or save states in multiplayer: both games must run the same frames.
+            fastForwardButton.visibility = View.GONE
+            netplayWifi = Netplay.WifiLocks(this).also { it.acquire() }
+        }
         surfaceView.holder.addCallback(this)
         pushControllerState()
     }
@@ -259,34 +276,273 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         running = true
         emulationThread = Thread {
             Process.setThreadPriority(Process.THREAD_PRIORITY_DISPLAY)
+            var joining: Netplay.Joining? = null
             try {
+                if (netplayRole == NETPLAY_GUEST) {
+                    showNetplayStatus(getString(R.string.netplay_joining), cancellable = true)
+                    joining = try {
+                        Netplay.Joining.connect(netplayHost, netplayPort, romMd5)
+                    } catch (e: Exception) {
+                        failAndFinish(getString(R.string.netplay_join_failed, e.message ?: e.javaClass.simpleName))
+                        return@Thread
+                    }
+                    // The host's emulation options, before the core reads them at boot.
+                    joining.config.options.forEach { (key, value) -> NativeBridge.setOption(key, value) }
+                }
+                if (netplayRole != NETPLAY_NONE) {
+                    Netplay.deterministicOptions.forEach { (key, value) -> NativeBridge.setOption(key, value) }
+                }
+
                 Log.i(logTag, "emulation thread boot start")
                 val bootResult = NativeBridge.bootRomForPlay(rootPath, romPath, inGameSaveKey())
                 Log.i(logTag, "boot result=$bootResult")
                 if (bootResult != "booted") {
-                    running = false
-                    runOnUiThread {
-                        Toast.makeText(this, bootResult, Toast.LENGTH_LONG).show()
-                        finish()
-                    }
+                    joining?.fail(bootResult)
+                    failAndFinish(bootResult)
                     return@Thread
                 }
 
                 lastInGameSaveFlushTimeMs = System.currentTimeMillis()
                 // Before any state load, so the state's achievement progress is restored with it.
                 Achievements.beginForLoadedGame(this)
-                applyEnabledCheats()
-                scheduleLaunchStateLoadIfNeeded()
+                when (netplayRole) {
+                    NETPLAY_HOST -> {
+                        applyEnabledCheats()
+                        netplayLink = hostNetplaySession() ?: return@Thread
+                    }
+                    NETPLAY_GUEST -> {
+                        val session = joining!!
+                        if (!NativeBridge.setSaveMemory(session.config.saveMemory)) {
+                            session.fail("save memory mismatch")
+                            failAndFinish(getString(R.string.netplay_join_failed, "save memory mismatch"))
+                            return@Thread
+                        }
+                        NativeBridge.setCheats(session.config.cheats.toTypedArray())
+                        netplayLink = try {
+                            session.ready(
+                                onLobby = { names -> showGuestLobby(session.hostName, names) },
+                                keepWaiting = { running },
+                            )
+                        } catch (e: IOException) {
+                            session.close()
+                            failAndFinish(getString(R.string.netplay_join_failed, e.message ?: e.javaClass.simpleName))
+                            return@Thread
+                        }
+                        joining = null
+                    }
+                    else -> {
+                        applyEnabledCheats()
+                        scheduleLaunchStateLoadIfNeeded()
+                    }
+                }
+                netplayLink?.let { link ->
+                    NativeBridge.netplayBegin(discardSaves = netplayRole == NETPLAY_GUEST)
+                    hideNetplayStatus()
+                    runOnUiThread {
+                        Toast.makeText(this, getString(R.string.netplay_started, link.playerCount, link.localPlayer + 1), Toast.LENGTH_LONG).show()
+                    }
+                }
                 updateSurfaceLayoutForCurrentFrame()
                 emulationLoop()
             } finally {
                 Log.i(logTag, "emulation thread shutting down")
+                joining?.close()
+                netplayLink?.close()
                 NativeBridge.shutdownSession()
             }
         }.apply {
             name = "Nin64-Emu"
             start()
         }
+    }
+
+    /** Hosting, after boot and before the first frame: open a lobby and wait for the host to start. */
+    private fun hostNetplaySession(): Netplay.Session? {
+        val saveMemory = NativeBridge.getSaveMemory()
+        if (saveMemory == null) {
+            failAndFinish(getString(R.string.netplay_host_failed, "no save memory"))
+            return null
+        }
+        val config = Netplay.SessionConfig(
+            options = listOf("mupen64plus-ForceDisableExtraMem" to if (disableExpansionPak) "True" else "False"),
+            cheats = CheatRepository.enabledCheatCodeLines(this, romPreferenceKey, romCrc),
+            saveMemory = saveMemory,
+        )
+        val lobby = try {
+            Netplay.HostLobby(gameTitle, romMd5, config) { runOnUiThread(::refreshHostLobby) }
+        } catch (e: IOException) {
+            failAndFinish(getString(R.string.netplay_host_failed, e.message ?: e.javaClass.simpleName))
+            return null
+        }
+        netplayLobby = lobby
+        runOnUiThread(::refreshHostLobby)
+        return try {
+            lobby.await { running }
+        } finally {
+            netplayLobby = null
+        }
+    }
+
+    /** On the UI thread: the lobby as it is now (a roster handed over from a network thread could be stale). */
+    private fun refreshHostLobby() {
+        val roster = netplayLobby?.roster() ?: return
+        val lines = roster.mapIndexed { index, player ->
+            val name = if (index == 0) getString(R.string.netplay_player_you, player.name) else player.name
+            getString(R.string.netplay_player_line, index + 1, name) +
+                if (player.ready) "" else " " + getString(R.string.netplay_player_loading)
+        }
+        val address = Netplay.localAddress()
+        val message = buildString {
+            append(getString(R.string.netplay_hosting, gameTitle))
+            address?.let { append("\n").append(getString(R.string.netplay_host_address, it)) }
+            append("\n\n").append(getString(R.string.netplay_players_header, roster.size, Netplay.MAX_PLAYERS))
+            lines.forEach { append("\n").append(it) }
+            if (roster.size == 1) append("\n\n").append(getString(R.string.netplay_waiting_for_players))
+        }
+        val canStart = roster.size > 1 && roster.all { it.ready }
+        showNetplayStatus(
+            message,
+            cancellable = true,
+            startLabel = getString(R.string.netplay_start, roster.size),
+            startEnabled = canStart,
+            onStart = {
+                netplayLobby?.requestStart()
+                showNetplayStatus(getString(R.string.netplay_starting), cancellable = true)
+            },
+        )
+    }
+
+    private fun showGuestLobby(hostName: String, names: List<String>) {
+        val message = buildString {
+            append(getString(R.string.netplay_joined, hostName))
+            append("\n\n").append(getString(R.string.netplay_players_header, names.size, Netplay.MAX_PLAYERS))
+            names.forEachIndexed { index, name -> append("\n").append(getString(R.string.netplay_player_line, index + 1, name)) }
+            append("\n\n").append(getString(R.string.netplay_waiting_for_start, hostName))
+        }
+        showNetplayStatus(message, cancellable = true)
+    }
+
+    private fun failAndFinish(message: String) {
+        running = false
+        runOnUiThread {
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            finish()
+        }
+    }
+
+    private fun showNetplayStatus(
+        message: String,
+        cancellable: Boolean,
+        startLabel: String? = null,
+        startEnabled: Boolean = false,
+        onStart: (() -> Unit)? = null,
+    ) {
+        runOnUiThread {
+            hideNetplayStatusNow()
+            val panel = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(24.dp, 20.dp, 24.dp, 16.dp)
+                background = GradientDrawable().apply {
+                    setColor(Color.argb(230, 20, 21, 28))
+                    cornerRadius = 14f * resources.displayMetrics.density
+                }
+                isClickable = true
+            }
+            if (onStart == null) {
+                panel.addView(android.widget.ProgressBar(this), LinearLayout.LayoutParams(36.dp, 36.dp))
+            }
+            panel.addView(TextView(this).apply {
+                text = message
+                setTextColor(Color.WHITE)
+                textSize = 16f
+                gravity = Gravity.CENTER
+                setPadding(0, 12.dp, 0, 0)
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            if (onStart != null && startLabel != null) {
+                panel.addView(coloredMenuButton(startLabel, Color.parseColor("#00C063")) { onStart() }.apply {
+                    isEnabled = startEnabled
+                    alpha = if (startEnabled) 1f else 0.45f
+                })
+            }
+            if (cancellable) {
+                panel.addView(coloredMenuButton(getString(android.R.string.cancel), Color.parseColor("#D93131")) { finish() })
+            }
+            netplayStatusView = panel
+            // A fixed width: wrapped around a spinner, the message would be squeezed to the spinner's width.
+            val screenWidth = rootContainer.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+            rootContainer.addView(
+                panel,
+                FrameLayout.LayoutParams((screenWidth - 32.dp).coerceAtMost(360.dp), FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+            )
+        }
+    }
+
+    private fun hideNetplayStatus() = runOnUiThread { hideNetplayStatusNow() }
+
+    private fun hideNetplayStatusNow() {
+        netplayStatusView?.let(rootContainer::removeView)
+        netplayStatusView = null
+    }
+
+    /**
+     * "Waiting for <name>", while someone's input is late (they paused, or the
+     * network hiccuped); [who] is "" when it is not known who, null when it is over.
+     */
+    private fun setNetplayStalled(who: String?) {
+        runOnUiThread {
+            if (who == null) {
+                netplayStallView?.let(rootContainer::removeView)
+                netplayStallView = null
+                return@runOnUiThread
+            }
+            if (netplayStallView != null) return@runOnUiThread
+            val view = TextView(this).apply {
+                text = if (who.isEmpty()) getString(R.string.netplay_waiting_for_others) else getString(R.string.netplay_waiting_for, who)
+                setTextColor(Color.WHITE)
+                textSize = 14f
+                setPadding(16.dp, 8.dp, 16.dp, 8.dp)
+                background = GradientDrawable().apply {
+                    setColor(Color.argb(200, 20, 21, 28))
+                    cornerRadius = 18f * resources.displayMetrics.density
+                }
+            }
+            netplayStallView = view
+            rootContainer.addView(
+                view,
+                FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
+                    .apply { bottomMargin = 24.dp }
+            )
+        }
+    }
+
+    /** The session ended: a host plays on alone, a guest (on the host's save) goes back to the library. */
+    private fun endNetplay(link: Netplay.Session) {
+        netplayLink = null
+        NativeBridge.netplayEnd()
+        setNetplayStalledOff()
+        val reason = link.closeReason ?: getString(R.string.netplay_ended)
+        if (netplayRole == NETPLAY_GUEST) {
+            failAndFinish(reason)
+        } else {
+            runOnUiThread {
+                Toast.makeText(this, getString(R.string.netplay_host_continues, reason), Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun setNetplayStalledOff() = runOnUiThread {
+        netplayStallView?.let(rootContainer::removeView)
+        netplayStallView = null
+    }
+
+    /** This device's controller, as the lockstep exchange packs it. */
+    private fun currentLocalInput(): Int {
+        val gamepadMag = analogStickX * analogStickX + analogStickY * analogStickY
+        val touchMag = touchAnalogStickX * touchAnalogStickX + touchAnalogStickY * touchAnalogStickY
+        val stickX = if (touchMag > gamepadMag) touchAnalogStickX else analogStickX
+        val stickY = if (touchMag > gamepadMag) touchAnalogStickY else analogStickY
+        return Netplay.pack(keyButtonMask or axisButtonMask or touchButtonMask, stickX, stickY)
     }
 
     private fun stopEmulation() {
@@ -330,11 +586,39 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     }
 
     private fun emulationLoop() {
+        var netplayFrame = 0
         while (running) {
             runPendingEmulationTasks()
-            if (paused) { Thread.sleep(16); continue }
-            NativeBridge.runFrame(OPS_PER_CHUNK)
-            maybeLoadLaunchStateAfterFrame()
+            val link = netplayLink
+            if (paused) {
+                link?.idle()
+                if (link != null && link.closed) endNetplay(link)
+                Thread.sleep(16)
+                continue
+            }
+            if (link != null) {
+                val inputs = link.exchange(netplayFrame, currentLocalInput(), ::setNetplayStalled)
+                if (inputs == null) {
+                    endNetplay(link)
+                    continue
+                }
+                NativeBridge.netplaySetInputs(inputs)
+                NativeBridge.runFrame(OPS_PER_CHUNK)
+                link.takeEvents().forEach { event ->
+                    runOnUiThread { Toast.makeText(this, event, Toast.LENGTH_LONG).show() }
+                }
+                if (netplayFrame > 0 && netplayFrame % Netplay.CHECKSUM_INTERVAL == 0) {
+                    link.recordChecksum(netplayFrame, NativeBridge.memoryChecksum())
+                }
+                if (link.desyncedAtFrame >= 0 && !netplayDesyncReported) {
+                    netplayDesyncReported = true
+                    runOnUiThread { Toast.makeText(this, R.string.netplay_desynced, Toast.LENGTH_LONG).show() }
+                }
+                netplayFrame++
+            } else {
+                NativeBridge.runFrame(OPS_PER_CHUNK)
+                maybeLoadLaunchStateAfterFrame()
+            }
             maybeFlushInGameSave()
         }
     }
@@ -551,12 +835,14 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         }, mwp().apply { bottomMargin = 10.dp })
 
         panel.addView(coloredMenuButton(getString(R.string.in_game_resume), blue) { resumeGame() })
-        panel.addView(coloredMenuButton(getString(R.string.in_game_save_state), green) {
-            showSlotPickerDialog(isSave = true)
-        })
-        panel.addView(coloredMenuButton(getString(R.string.in_game_load_state), green) {
-            showSlotPickerDialog(isSave = false)
-        })
+        if (netplayRole == NETPLAY_NONE) {
+            panel.addView(coloredMenuButton(getString(R.string.in_game_save_state), green) {
+                showSlotPickerDialog(isSave = true)
+            })
+            panel.addView(coloredMenuButton(getString(R.string.in_game_load_state), green) {
+                showSlotPickerDialog(isSave = false)
+            })
+        }
         panel.addView(coloredMenuButton(getString(R.string.menu_achievements), gold) {
             Achievements.showList(this)
         })
@@ -895,6 +1181,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         pushControllerState()
         stopEmulation()
         NativeBridge.clearSurface()
+        netplayWifi?.release()
         super.onDestroy()
     }
 
@@ -906,6 +1193,14 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         private const val EXTRA_ROM_PREFERENCE_KEY = "extra_rom_preference_key"
         private const val EXTRA_ROM_CRC = "extra_rom_crc"
         private const val EXTRA_LOAD_STATE_SLOT = "extra_load_state_slot"
+        private const val EXTRA_NETPLAY_ROLE = "extra_netplay_role"
+        private const val EXTRA_NETPLAY_HOST = "extra_netplay_host"
+        private const val EXTRA_NETPLAY_PORT = "extra_netplay_port"
+        private const val EXTRA_ROM_MD5 = "extra_rom_md5"
+        private const val EXTRA_GAME_TITLE = "extra_game_title"
+        const val NETPLAY_NONE = 0
+        const val NETPLAY_HOST = 1
+        const val NETPLAY_GUEST = 2
         private const val NO_LOAD_STATE_SLOT = -1
         private const val OPS_PER_CHUNK = 2_000_000
         private const val IN_GAME_SAVE_FLUSH_INTERVAL_MS = 15_000L
@@ -924,6 +1219,11 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
             romPreferenceKey: String? = null,
             romCrc: String? = null,
             loadStateSlot: Int = NO_LOAD_STATE_SLOT,
+            netplayRole: Int = NETPLAY_NONE,
+            netplayHost: String? = null,
+            netplayPort: Int = Netplay.SESSION_PORT,
+            romMd5: String? = null,
+            gameTitle: String? = null,
         ) {
             context.startActivity(
                 Intent(context, GameActivity::class.java)
@@ -934,6 +1234,11 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
                     .putExtra(EXTRA_ROM_PREFERENCE_KEY, romPreferenceKey)
                     .putExtra(EXTRA_ROM_CRC, romCrc)
                     .putExtra(EXTRA_LOAD_STATE_SLOT, loadStateSlot)
+                    .putExtra(EXTRA_NETPLAY_ROLE, netplayRole)
+                    .putExtra(EXTRA_NETPLAY_HOST, netplayHost)
+                    .putExtra(EXTRA_NETPLAY_PORT, netplayPort)
+                    .putExtra(EXTRA_ROM_MD5, romMd5)
+                    .putExtra(EXTRA_GAME_TITLE, gameTitle)
             )
         }
     }

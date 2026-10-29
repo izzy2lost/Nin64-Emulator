@@ -43,6 +43,7 @@ find_library(android-lib android)
 find_library(dl-lib dl)
 find_library(egl-lib EGL)
 find_library(glesv3-lib GLESv3)
+find_library(z-lib z)
 find_package(oboe REQUIRED CONFIG)
 
 add_library(
@@ -97,5 +98,6 @@ target_link_libraries(
     ${egl-lib}
     ${glesv3-lib}
     oboe::oboe
+    ${z-lib}
     m
 )

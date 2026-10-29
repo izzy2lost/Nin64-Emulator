@@ -151,6 +151,34 @@
     <string name="games_header">Games</string>
     <string name="rom_sources_local_only">%1$s</string>
     <string name="rom_sources_selected">%2$s</string>
+    <!-- Local multiplayer -->
+    <string name="netplay_join">Join multiplayer</string>
+    <string name="netplay_join_title">Join a game on this Wi-Fi</string>
+    <string name="netplay_searching">Looking for games hosted on this Wi-Fi…\n\nOn the other device, long-press a game and choose Host multiplayer.</string>
+    <string name="netplay_host_entry">%1$s · hosted by %2$s · %3$d/%4$d players</string>
+    <string name="netplay_missing_game">You need %1$s in your games folder to join. Both players need the same copy of the game.</string>
+    <string name="netplay_host_action">Host multiplayer</string>
+    <string name="netplay_host_summary">Play with up to 4 devices on this Wi-Fi</string>
+    <string name="netplay_hosting">Hosting %1$s</string>
+    <string name="netplay_waiting_for_players">On the other devices, tap Join multiplayer in the library.</string>
+    <string name="netplay_players_header">Players (%1$d/%2$d)</string>
+    <string name="netplay_player_line">%1$d. %2$s</string>
+    <string name="netplay_player_you">%1$s (you)</string>
+    <string name="netplay_player_loading">· loading…</string>
+    <string name="netplay_start">Start game · %1$d players</string>
+    <string name="netplay_starting">Starting…</string>
+    <string name="netplay_joined">Joined %1$s\'s game</string>
+    <string name="netplay_waiting_for_start">Waiting for %1$s to start…</string>
+    <string name="netplay_waiting_for_others">Waiting for the other players…</string>
+    <string name="netplay_host_address">This device: %1$s</string>
+    <string name="netplay_joining">Joining…</string>
+    <string name="netplay_join_failed">Could not join: %1$s</string>
+    <string name="netplay_host_failed">Could not host: %1$s</string>
+    <string name="netplay_started">%1$d players · you are player %2$d</string>
+    <string name="netplay_waiting_for">Waiting for %1$s…</string>
+    <string name="netplay_ended">Everyone else left.</string>
+    <string name="netplay_host_continues">%1$s Playing on alone.</string>
+    <string name="netplay_desynced">The two games are out of sync. Quit and start the session again.</string>
     <!-- RetroAchievements -->
     <string name="menu_achievements">Achievements</string>
     <string name="cheevos_close">Close</string>

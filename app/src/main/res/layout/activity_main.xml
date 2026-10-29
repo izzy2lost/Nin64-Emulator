@@ -50,6 +50,17 @@
             android:src="@drawable/ic_settings"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/settings" />
+
+        <ImageButton
+            android:id="@+id/joinMultiplayerButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_toStartOf="@id/settingsButton"
+            android:layout_alignParentTop="true"
+            android:layout_marginTop="8dp"
+            android:src="@drawable/ic_multiplayer"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/netplay_join" />
     </RelativeLayout>
 
     <!-- Long-press hint bar -->

@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
+#include <zlib.h>
 
 #include "libretro.h"
 #include "audio_player.h"
@@ -174,6 +175,18 @@ static volatile unsigned int g_button_mask;
 static volatile int g_stick_x;
 static volatile int g_stick_y;
 static volatile int g_fast_forward_enabled;
+/*
+ * Local multiplayer: while active, all four players read the inputs the
+ * lockstep exchange fixed for this frame, never the live touch/pad state,
+ * so both devices feed the core identical input. A guest plays on the host's
+ * save memory, which must never reach the guest's own save files.
+ */
+static int g_netplay_active;
+static int g_netplay_discard_saves;
+#define NETPLAY_MAX_PLAYERS 4
+static unsigned int g_netplay_mask[NETPLAY_MAX_PLAYERS];
+static int g_netplay_stick_x[NETPLAY_MAX_PLAYERS];
+static int g_netplay_stick_y[NETPLAY_MAX_PLAYERS];
 static unsigned g_hw_frame_log_count;
 static unsigned g_sw_frame_log_count;
 static unsigned g_run_frame_log_count;
@@ -1476,12 +1489,24 @@ static int scale_n64_axis_to_libretro(int value)
 
 static int16_t bridge_input_state(unsigned port, unsigned device, unsigned index, unsigned id)
 {
-    unsigned int button_mask = g_button_mask;
-    int stick_x = g_stick_x;
-    int stick_y = g_stick_y;
+    unsigned int button_mask;
+    int stick_x;
+    int stick_y;
 
-    if (port > 0) {
-        return 0;
+    if (g_netplay_active) {
+        if (port >= NETPLAY_MAX_PLAYERS) {
+            return 0;
+        }
+        button_mask = g_netplay_mask[port];
+        stick_x = g_netplay_stick_x[port];
+        stick_y = g_netplay_stick_y[port];
+    } else {
+        if (port > 0) {
+            return 0;
+        }
+        button_mask = g_button_mask;
+        stick_x = g_stick_x;
+        stick_y = g_stick_y;
     }
 
     if (device == RETRO_DEVICE_JOYPAD) {
@@ -2006,6 +2031,10 @@ static int bridge_save_memory_to_path(void)
     size_t written;
     char temp_path[1200];
 
+    if (g_netplay_discard_saves) {
+        return 1;
+    }
+
     if (!g_bridge.save_memory_path[0]) {
         bridge_set_error("No in-game save path is configured.");
         return 0;
@@ -2101,6 +2130,8 @@ static void bridge_shutdown(void)
     }
 
     bridge_unload_game();
+    g_netplay_active = 0;
+    g_netplay_discard_saves = 0;
 
     if (g_bridge.handle && g_bridge.core_initialized) {
         g_bridge.retro_deinit();
@@ -2463,6 +2494,108 @@ Java_com_izzy2lost_nin64_NativeBridge_setCheats(JNIEnv *env, jobject thiz, jobje
         }
         (*env)->DeleteLocalRef(env, code_line);
     }
+}
+
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_netplayBegin(JNIEnv *env, jobject thiz, jboolean discardSaves)
+{
+    (void)env;
+    (void)thiz;
+    memset(g_netplay_mask, 0, sizeof(g_netplay_mask));
+    memset(g_netplay_stick_x, 0, sizeof(g_netplay_stick_x));
+    memset(g_netplay_stick_y, 0, sizeof(g_netplay_stick_y));
+    g_netplay_discard_saves = discardSaves ? 1 : 0;
+    g_netplay_active = 1;
+    g_fast_forward_enabled = 0;
+}
+
+/* Back to the live input; a guest keeps discarding saves until the game is shut down. */
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_netplayEnd(JNIEnv *env, jobject thiz)
+{
+    (void)env;
+    (void)thiz;
+    g_netplay_active = 0;
+}
+
+/*
+ * One packed int per player, as Netplay.pack() builds it: buttons in the low
+ * 16 bits, then the stick's X and Y as signed bytes.
+ */
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_netplaySetInputs(JNIEnv *env, jobject thiz, jintArray packed)
+{
+    jint values[NETPLAY_MAX_PLAYERS] = {0};
+    jsize count;
+    int i;
+
+    (void)thiz;
+    if (!packed) {
+        return;
+    }
+    count = (*env)->GetArrayLength(env, packed);
+    if (count > NETPLAY_MAX_PLAYERS) {
+        count = NETPLAY_MAX_PLAYERS;
+    }
+    (*env)->GetIntArrayRegion(env, packed, 0, count, values);
+    for (i = 0; i < NETPLAY_MAX_PLAYERS; i++) {
+        uint32_t v = (uint32_t)values[i];
+        g_netplay_mask[i] = v & 0xffffu;
+        g_netplay_stick_x[i] = (int8_t)((v >> 16) & 0xffu);
+        g_netplay_stick_y[i] = (int8_t)((v >> 24) & 0xffu);
+    }
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_getSaveMemory(JNIEnv *env, jobject thiz)
+{
+    void *memory = NULL;
+    size_t size = 0;
+    jbyteArray out;
+
+    (void)thiz;
+    if (!g_bridge.game_loaded || !bridge_get_save_memory(&memory, &size)) {
+        return NULL;
+    }
+    out = (*env)->NewByteArray(env, (jsize)size);
+    if (out) {
+        (*env)->SetByteArrayRegion(env, out, 0, (jsize)size, (const jbyte *)memory);
+    }
+    return out;
+}
+
+/* Before the first frame: a guest takes the host's save memory as its own. */
+JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_setSaveMemory(JNIEnv *env, jobject thiz, jbyteArray data)
+{
+    void *memory = NULL;
+    size_t size = 0;
+
+    (void)thiz;
+    if (!data || !g_bridge.game_loaded || !bridge_get_save_memory(&memory, &size)) {
+        return JNI_FALSE;
+    }
+    if ((size_t)(*env)->GetArrayLength(env, data) != size) {
+        bridge_set_error("Save memory size mismatch.");
+        return JNI_FALSE;
+    }
+    (*env)->GetByteArrayRegion(env, data, 0, (jsize)size, (jbyte *)memory);
+    return JNI_TRUE;
+}
+
+/* CRC32 of RDRAM, compared between the two players to catch a desync. */
+JNIEXPORT jint JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_memoryChecksum(JNIEnv *env, jobject thiz)
+{
+    size_t size = 0;
+    const uint8_t *ram = nin64_bridge_system_ram(&size);
+
+    (void)env;
+    (void)thiz;
+    if (!ram || size == 0) {
+        return 0;
+    }
+    return (jint)crc32(0L, ram, (uInt)size);
 }
 
 JNIEXPORT jint JNICALL
