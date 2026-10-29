@@ -20,6 +20,7 @@
 
 #include "libretro.h"
 #include "audio_player.h"
+#include "cheevos_bridge.h"
 
 #ifndef NIN64_LIBRETRO_CORE_NAME
 #define NIN64_LIBRETRO_CORE_NAME "libmupen64plus_next_libretro.so"
@@ -1704,6 +1705,7 @@ static void bridge_reset_video_state(void)
 
 static void bridge_unload_game(void)
 {
+    nin64_cheevos_end_session();
     audio_player_stop();
     
     if (g_bridge.game_loaded) {
@@ -1900,6 +1902,7 @@ static int bridge_save_state_to_path(const char *path)
         return 0;
     }
 
+    nin64_cheevos_after_save_state(path);
     return 1;
 }
 
@@ -2075,6 +2078,7 @@ static int bridge_load_state_from_path(const char *path)
         return 0;
     }
 
+    nin64_cheevos_after_load_state(path);
     g_bridge.next_frame_deadline_ns = bridge_now_ns();
     return 1;
 }
@@ -2153,6 +2157,27 @@ static void bridge_sleep_until_ns(uint64_t deadline_ns)
     }
 }
 
+const uint8_t *nin64_bridge_rom_data(size_t *size)
+{
+    *size = g_bridge.game_loaded ? g_bridge.rom_size : 0;
+    return g_bridge.game_loaded ? (const uint8_t *)g_bridge.rom_data : NULL;
+}
+
+const uint8_t *nin64_bridge_system_ram(size_t *size)
+{
+    void *ram;
+
+    *size = 0;
+    if (!g_bridge.game_loaded || !g_bridge.retro_get_memory_data || !g_bridge.retro_get_memory_size) {
+        return NULL;
+    }
+    ram = g_bridge.retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM);
+    if (ram) {
+        *size = g_bridge.retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM);
+    }
+    return (const uint8_t *)ram;
+}
+
 static void bridge_run_frame(void)
 {
     uint64_t now_ns;
@@ -2187,6 +2212,7 @@ static void bridge_run_frame(void)
         bridge_sleep_until_ns(g_bridge.next_frame_deadline_ns);
     }
     g_bridge.retro_run();
+    nin64_cheevos_frame();
 
     now_ns = bridge_now_ns();
     if (!g_bridge.frame_interval_ns) {
@@ -2442,8 +2468,12 @@ Java_com_izzy2lost_nin64_NativeBridge_setCheats(JNIEnv *env, jobject thiz, jobje
 JNIEXPORT jint JNICALL
 JNI_OnLoad(JavaVM *vm, void *reserved)
 {
-    (void)vm;
+    JNIEnv *env = NULL;
+
     (void)reserved;
+    if ((*vm)->GetEnv(vm, (void **)&env, JNI_VERSION_1_6) == JNI_OK) {
+        nin64_cheevos_init_jni(vm, env);
+    }
     g_bridge.frame_interval_ns = DEFAULT_FRAME_INTERVAL_NS;
     g_bridge.egl_display = EGL_NO_DISPLAY;
     g_bridge.egl_context = EGL_NO_CONTEXT;

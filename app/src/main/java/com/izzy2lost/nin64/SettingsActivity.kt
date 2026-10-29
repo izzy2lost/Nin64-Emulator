@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.LayoutInflater
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -13,10 +14,14 @@ import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.materialswitch.MaterialSwitch
+import kotlin.concurrent.thread
 
 class SettingsActivity : AppCompatActivity(), NoAdsPurchaseManager.Listener {
 
@@ -100,6 +105,22 @@ class SettingsActivity : AppCompatActivity(), NoAdsPurchaseManager.Listener {
             Toast.makeText(this, R.string.controls_global_reset_done, Toast.LENGTH_SHORT).show()
         }
 
+        findViewById<MaterialButton>(R.id.cheevosAccountButton).setOnClickListener {
+            if (Achievements.isSignedIn(this)) confirmCheevosSignOut() else showCheevosSignIn()
+        }
+        findViewById<MaterialButton>(R.id.cheevosSignUpButton).setOnClickListener {
+            openAboutLink(Achievements.SIGN_UP_URL)
+        }
+        findViewById<MaterialSwitch>(R.id.cheevosEnabledSwitch).apply {
+            isChecked = Achievements.isEnabled(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked -> Achievements.setEnabled(this@SettingsActivity, checked) }
+        }
+        findViewById<MaterialSwitch>(R.id.cheevosNotificationsSwitch).apply {
+            isChecked = Achievements.notificationsEnabled(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked -> Achievements.setNotificationsEnabled(this@SettingsActivity, checked) }
+        }
+        updateCheevosAccountUi()
+
         privacyOptionsRow = findViewById(R.id.privacyOptionsRow)
         findViewById<MaterialButton>(R.id.privacyOptionsButton).setOnClickListener {
             showPrivacyOptions()
@@ -143,6 +164,82 @@ class SettingsActivity : AppCompatActivity(), NoAdsPurchaseManager.Listener {
         } else {
             getString(R.string.game_folder_not_set)
         }
+    }
+
+    // ── RetroAchievements ─────────────────────────────────────────────────────
+
+    private fun updateCheevosAccountUi() {
+        val signedIn = Achievements.isSignedIn(this)
+        findViewById<TextView>(R.id.cheevosAccountText).text = if (signedIn) {
+            getString(R.string.settings_cheevos_signed_in, Achievements.displayName(this))
+        } else {
+            getString(R.string.settings_cheevos_signed_out)
+        }
+        findViewById<MaterialButton>(R.id.cheevosAccountButton).setText(
+            if (signedIn) R.string.cheevos_sign_out else R.string.cheevos_sign_in
+        )
+        findViewById<View>(R.id.cheevosSignUpButton).visibility = if (signedIn) View.GONE else View.VISIBLE
+    }
+
+    private fun showCheevosSignIn() {
+        val content = LayoutInflater.from(this).inflate(R.layout.dialog_cheevos_login, null, false)
+        val user = content.findViewById<TextView>(R.id.cheevosLoginUser)
+        val password = content.findViewById<TextView>(R.id.cheevosLoginPassword)
+        val status = content.findViewById<TextView>(R.id.cheevosLoginStatus)
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.cheevos_sign_in_title)
+            .setIcon(R.drawable.ic_trophy)
+            .setView(content)
+            .setPositiveButton(R.string.cheevos_sign_in, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        dialog.setOnShowListener {
+            val go = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            go.setOnClickListener {
+                val u = user.text.toString().trim()
+                val p = password.text.toString()
+                if (u.isEmpty() || p.isEmpty()) return@setOnClickListener
+                go.isEnabled = false
+                status.setTextColor(MaterialColors.getColor(status, com.google.android.material.R.attr.colorOnSurfaceVariant))
+                status.setText(R.string.cheevos_signing_in)
+                status.visibility = View.VISIBLE
+                // Blocking network call: the native client signs in and hands back a token.
+                thread(name = "CheevosLogin") {
+                    val result = runCatching { NativeBridge.cheevosLogin(u, p) }
+                        .getOrElse { arrayOf("", it.message.orEmpty()) }
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        if (result.getOrNull(0).isNullOrEmpty()) {
+                            go.isEnabled = true
+                            status.setTextColor(MaterialColors.getColor(status, androidx.appcompat.R.attr.colorError))
+                            status.text = getString(R.string.cheevos_sign_in_error, result.getOrNull(1).orEmpty())
+                        } else {
+                            Achievements.signIn(this, result[0], result[1], result.getOrNull(2).orEmpty())
+                            Toast.makeText(
+                                this,
+                                getString(R.string.cheevos_signed_in_toast, Achievements.displayName(this)),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            updateCheevosAccountUi()
+                            dialog.dismiss()
+                        }
+                    }
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun confirmCheevosSignOut() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.cheevos_sign_out)
+            .setMessage(R.string.cheevos_sign_out_confirm)
+            .setPositiveButton(R.string.cheevos_sign_out) { _, _ ->
+                Achievements.signOut(this)
+                updateCheevosAccountUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun showRemoveAdsPurchase() {

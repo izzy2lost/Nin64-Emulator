@@ -71,6 +71,14 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private var touchAnalogStickY = 0
     private var startComboPressed = false
     private var selectComboPressed = false
+    private var cheevoPopups: Achievements.Popups? = null
+    private val cheevoHandler = Handler(Looper.getMainLooper())
+    private val cheevoPoll = object : Runnable {
+        override fun run() {
+            cheevoPopups?.poll()
+            cheevoHandler.postDelayed(this, 250)
+        }
+    }
 
     private val rootPath: String get() = intent.getStringExtra(EXTRA_ROOT_PATH) ?: ""
     private val romPath: String get() = intent.getStringExtra(EXTRA_ROM_PATH) ?: ""
@@ -181,6 +189,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         fastForwardButton.applySafeAreaMargins(applyTop = true, applyEnd = true)
 
         setContentView(rootContainer)
+        cheevoPopups = Achievements.Popups(this, rootContainer)
         surfaceView.holder.addCallback(this)
         pushControllerState()
     }
@@ -236,9 +245,12 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         super.onResume()
         surfaceView.requestFocus()
         updateSurfaceLayoutForCurrentFrame()
+        cheevoHandler.removeCallbacks(cheevoPoll)
+        cheevoHandler.post(cheevoPoll)
     }
 
     override fun onPause() {
+        cheevoHandler.removeCallbacks(cheevoPoll)
         requestInGameSaveFlush()
         super.onPause()
     }
@@ -261,6 +273,8 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
                 }
 
                 lastInGameSaveFlushTimeMs = System.currentTimeMillis()
+                // Before any state load, so the state's achievement progress is restored with it.
+                Achievements.beginForLoadedGame(this)
                 applyEnabledCheats()
                 scheduleLaunchStateLoadIfNeeded()
                 updateSurfaceLayoutForCurrentFrame()
@@ -508,6 +522,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         val blue     = Color.parseColor("#0056EA")
         val green    = Color.parseColor("#00C063")
         val red      = Color.parseColor("#D93131")
+        val gold     = if (isNight) Color.parseColor("#FEDF5A") else Color.parseColor("#B07F00")
 
         val overlay = FrameLayout(this).apply {
             setBackgroundColor(Color.argb(200, 0, 0, 0))
@@ -541,6 +556,9 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         })
         panel.addView(coloredMenuButton(getString(R.string.in_game_load_state), green) {
             showSlotPickerDialog(isSave = false)
+        })
+        panel.addView(coloredMenuButton(getString(R.string.menu_achievements), gold) {
+            Achievements.showList(this)
         })
         panel.addView(coloredMenuButton(getString(R.string.in_game_quit), red) { finish() })
 
@@ -870,6 +888,8 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     }
 
     override fun onDestroy() {
+        cheevoHandler.removeCallbacks(cheevoPoll)
+        cheevoPopups?.clear()
         keyButtonMask = 0; axisButtonMask = 0; touchButtonMask = 0
         analogStickX = 0; analogStickY = 0; touchAnalogStickX = 0; touchAnalogStickY = 0
         pushControllerState()

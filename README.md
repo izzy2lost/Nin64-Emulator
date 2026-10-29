@@ -18,6 +18,7 @@ A Nintendo 64 emulator for Android, powered by [Mupen64Plus-Next](https://github
 - **Physical controller remapping** — fully remap USB and Bluetooth controller buttons and sticks
 - **Game library browser** — scan and launch ROMs from local storage
 - **Save states** — save and restore game progress at any point
+- **RetroAchievements** — sign in to earn achievements (casual mode), with unlock popups and an in-game achievement list
 - **In-game saving** — SRAM / FlashRAM / EEPROM / MemPak persistence
 - **Google Oboe audio** — low-latency audio backend
 - **Free with optional ad removal** — play for free with ads, or purchase ad removal as an in-app purchase

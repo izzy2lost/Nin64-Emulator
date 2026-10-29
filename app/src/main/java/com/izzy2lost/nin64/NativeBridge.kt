@@ -21,4 +21,14 @@ object NativeBridge {
     external fun setOption(key: String, value: String)
     external fun setFastForwardEnabled(enabled: Boolean)
     external fun setCheats(codeLines: Array<String>)
+
+    // RetroAchievements
+    /** After [bootRomForPlay], on the emulation thread: signs in and loads the game's achievements in the background. */
+    external fun cheevosBegin(user: String, token: String)
+    /** Messages to show: kind, title, detail, points, badge URL, separated by \u001f. */
+    external fun cheevosMessages(): Array<String>
+    /** Header row (state, game, game badge, unlocked, total, points, total points), then one row per achievement. */
+    external fun cheevosList(): Array<String>
+    /** Blocking sign-in for Settings: {user, token, display name, score}, or {"", error}. */
+    external fun cheevosLogin(user: String, password: String): Array<String>
 }
