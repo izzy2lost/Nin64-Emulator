@@ -1268,7 +1268,7 @@ class MainActivity : AppCompatActivity() {
 
             /** Focused, the row fills with its outline colour. */
             fun style(focused: Boolean) {
-                val color = card.strokeColor
+                val color = card.strokeColorStateList?.defaultColor ?: Color.TRANSPARENT
                 card.setCardBackgroundColor(if (focused) color else Color.TRANSPARENT)
                 card.strokeWidth = ((if (focused) 3f else 1.5f) * resources.displayMetrics.density).roundToInt()
                 if (focused) {
