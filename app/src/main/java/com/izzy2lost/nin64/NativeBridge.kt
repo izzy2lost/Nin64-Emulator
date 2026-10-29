@@ -32,6 +32,8 @@ object NativeBridge {
     external fun getSaveMemory(): ByteArray?
     external fun setSaveMemory(data: ByteArray): Boolean
     external fun memoryChecksum(): Int
+    /** The part of the game image to show (fractions from its top left); (0, 0, 1, 1) is all of it. */
+    external fun setViewCrop(left: Float, top: Float, width: Float, height: Float)
 
     // RetroAchievements
     /** After [bootRomForPlay], on the emulation thread: signs in and loads the game's achievements in the background. */

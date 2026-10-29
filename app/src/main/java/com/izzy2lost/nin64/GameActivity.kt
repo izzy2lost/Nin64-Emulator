@@ -48,6 +48,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private lateinit var visibilityToggle: ImageButton
     private lateinit var menuButton: ImageButton
     private lateinit var fastForwardButton: ImageButton
+    private lateinit var splitViewButton: ImageButton
     private lateinit var controlsConfig: ControlsConfig
     private var touchControlsVisible = true
     private var fastForwardEnabled = false
@@ -79,6 +80,11 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private var netplayStatusView: View? = null
     private var netplayStallView: TextView? = null
     private var netplayDesyncReported = false
+    /** In split-screen multiplayer: showing only this player's part, and the game's split. */
+    private var splitViewZoomed = false
+    private var splitLayout = Netplay.SplitLayout.TOP_BOTTOM
+    @Volatile private var viewCrop = Netplay.SplitLayout.WHOLE
+    private var surfaceBufferPinned = false
     private val cheevoHandler = Handler(Looper.getMainLooper())
     private val cheevoPoll = object : Runnable {
         override fun run() {
@@ -199,6 +205,24 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
             }
         )
         fastForwardButton.applySafeAreaMargins(applyTop = true, applyEnd = true)
+
+        // Multiplayer has no fast forward; its place is the split-screen zoom.
+        splitViewButton = ImageButton(this).apply {
+            setImageResource(R.drawable.ic_zoom_in)
+            setColorFilter(Color.WHITE)
+            background = circularButtonBackground(Color.argb(170, 14, 15, 20))
+            contentDescription = getString(R.string.netplay_view_zoom_in)
+            visibility = View.GONE
+            setOnClickListener { setSplitViewZoomed(!splitViewZoomed) }
+        }
+        rootContainer.addView(
+            splitViewButton,
+            FrameLayout.LayoutParams(btnSize, btnSize, Gravity.TOP or Gravity.END).apply {
+                topMargin = btnMargin
+                marginEnd = btnMargin
+            }
+        )
+        splitViewButton.applySafeAreaMargins(applyTop = true, applyEnd = true)
 
         setContentView(rootContainer)
         cheevoPopups = Achievements.Popups(this, rootContainer)
@@ -339,6 +363,7 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
                     NativeBridge.netplayBegin(discardSaves = netplayRole == NETPLAY_GUEST)
                     hideNetplayStatus()
                     runOnUiThread {
+                        restoreSplitView(link.playerCount)
                         Toast.makeText(this, getString(R.string.netplay_started, link.playerCount, link.localPlayer + 1), Toast.LENGTH_LONG).show()
                     }
                 }
@@ -521,6 +546,11 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
         netplayLink = null
         NativeBridge.netplayEnd()
         setNetplayStalledOff()
+        runOnUiThread {
+            splitViewButton.visibility = View.GONE
+            splitViewZoomed = false
+            applyViewCrop()
+        }
         val reason = link.closeReason ?: getString(R.string.netplay_ended)
         if (netplayRole == NETPLAY_GUEST) {
             failAndFinish(reason)
@@ -534,6 +564,77 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private fun setNetplayStalledOff() = runOnUiThread {
         netplayStallView?.let(rootContainer::removeView)
         netplayStallView = null
+    }
+
+    // ── Split-screen view ─────────────────────────────────────────────────────
+
+    private fun splitViewPrefs() = getSharedPreferences(DisplayOptionsRepository.PREFS_NAME, MODE_PRIVATE)
+
+    private fun splitViewKey(name: String) = "netplay_$name.${romPreferenceKey ?: romMd5}"
+
+    /** Once the game starts: the split last chosen for this game, zoomed in if it was. */
+    private fun restoreSplitView(players: Int) {
+        val prefs = splitViewPrefs()
+        splitLayout = Netplay.SplitLayout.fromKey(prefs.getString(splitViewKey("split_layout"), null))
+            ?: Netplay.SplitLayout.defaultFor(players)
+        splitViewZoomed = prefs.getBoolean(splitViewKey("split_zoomed"), false)
+        splitViewButton.visibility = View.VISIBLE
+        applyViewCrop()
+    }
+
+    private fun setSplitViewZoomed(zoomed: Boolean) {
+        splitViewZoomed = zoomed
+        splitViewPrefs().edit().putBoolean(splitViewKey("split_zoomed"), zoomed).apply()
+        applyViewCrop()
+    }
+
+    private fun applyViewCrop() {
+        val link = netplayLink
+        val crop = if (splitViewZoomed && link != null) splitLayout.crop(link.localPlayer) else Netplay.SplitLayout.WHOLE
+        // The renderer keeps the size it started with; pinning the buffer to it means
+        // the view can take the zoomed part's shape without the renderer noticing.
+        if (crop !== Netplay.SplitLayout.WHOLE && !surfaceBufferPinned) {
+            val width = NativeBridge.getFrameWidth()
+            val height = NativeBridge.getFrameHeight()
+            if (width > 0 && height > 0) {
+                surfaceView.holder.setFixedSize(width, height)
+                surfaceBufferPinned = true
+            }
+        }
+        viewCrop = crop
+        NativeBridge.setViewCrop(crop[0], crop[1], crop[2], crop[3])
+        splitViewButton.setImageResource(if (splitViewZoomed) R.drawable.ic_zoom_out else R.drawable.ic_zoom_in)
+        splitViewButton.contentDescription = getString(
+            if (splitViewZoomed) R.string.netplay_view_zoom_out else R.string.netplay_view_zoom_in
+        )
+        updateSurfaceLayoutForCurrentFrame()
+    }
+
+    /** Whole screen (split screen), or only your part of one of the usual splits. */
+    private fun showSplitViewDialog() {
+        val layouts = Netplay.SplitLayout.entries
+        val labels = arrayOf(getString(R.string.netplay_view_whole)) + layouts.map {
+            getString(
+                when (it) {
+                    Netplay.SplitLayout.TOP_BOTTOM -> R.string.netplay_view_top_bottom
+                    Netplay.SplitLayout.LEFT_RIGHT -> R.string.netplay_view_left_right
+                    Netplay.SplitLayout.QUARTERS -> R.string.netplay_view_quarters
+                }
+            )
+        }
+        val checked = if (splitViewZoomed) layouts.indexOf(splitLayout) + 1 else 0
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.netplay_view_title)
+            .setSingleChoiceItems(labels, checked) { dialog, which ->
+                if (which > 0) {
+                    splitLayout = layouts[which - 1]
+                    splitViewPrefs().edit().putString(splitViewKey("split_layout"), splitLayout.key).apply()
+                }
+                setSplitViewZoomed(which > 0)
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     /** This device's controller, as the lockstep exchange packs it. */
@@ -649,8 +750,10 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
     }
 
     private fun updateSurfaceLayoutForCurrentFrame() {
-        val frameWidth = NativeBridge.getFrameWidth()
-        val frameHeight = NativeBridge.getFrameHeight()
+        // Zoomed in on a split-screen part, the surface takes that part's shape.
+        val crop = viewCrop
+        val frameWidth = (NativeBridge.getFrameWidth() * crop[2]).roundToInt()
+        val frameHeight = (NativeBridge.getFrameHeight() * crop[3]).roundToInt()
         if (frameWidth <= 0 || frameHeight <= 0) return
 
         runOnUiThread {
@@ -841,6 +944,11 @@ class GameActivity : AppCompatActivity(), SurfaceHolder.Callback {
             })
             panel.addView(coloredMenuButton(getString(R.string.in_game_load_state), green) {
                 showSlotPickerDialog(isSave = false)
+            })
+        }
+        if (netplayLink != null) {
+            panel.addView(coloredMenuButton(getString(R.string.netplay_view_title), blue) {
+                showSplitViewDialog()
             })
         }
         panel.addView(coloredMenuButton(getString(R.string.menu_achievements), gold) {

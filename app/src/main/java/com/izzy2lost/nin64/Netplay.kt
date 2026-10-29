@@ -69,6 +69,36 @@ internal object Netplay {
         "mupen64plus-ThreadedRenderer" to "False",
     )
 
+    /**
+     * How a game divides the screen between players, so each can zoom in on
+     * their own part. Games choose their own split; the player picks the one
+     * that matches.
+     */
+    enum class SplitLayout(val key: String) {
+        TOP_BOTTOM("top_bottom"),
+        LEFT_RIGHT("left_right"),
+        QUARTERS("quarters");
+
+        /** [player]'s part (0 = player 1): left, top, width, height, as fractions of the image. */
+        fun crop(player: Int): FloatArray {
+            val second = if (player % 2 == 0) 0f else 0.5f
+            return when (this) {
+                TOP_BOTTOM -> floatArrayOf(0f, second, 1f, 0.5f)
+                LEFT_RIGHT -> floatArrayOf(second, 0f, 0.5f, 1f)
+                QUARTERS -> floatArrayOf(second, if (player < 2) 0f else 0.5f, 0.5f, 0.5f)
+            }
+        }
+
+        companion object {
+            val WHOLE = floatArrayOf(0f, 0f, 1f, 1f)
+
+            /** The usual split: halves one above the other for two players, quarters for more. */
+            fun defaultFor(players: Int) = if (players <= 2) TOP_BOTTOM else QUARTERS
+
+            fun fromKey(key: String?) = entries.firstOrNull { it.key == key }
+        }
+    }
+
     /** What a host announces, and what a guest needs to find the same game. */
     data class Beacon(
         val title: String,

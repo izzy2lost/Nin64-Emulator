@@ -178,6 +178,13 @@
     <string name="netplay_waiting_for">Waiting for %1$s…</string>
     <string name="netplay_ended">Everyone else left.</string>
     <string name="netplay_host_continues">%1$s Playing on alone.</string>
+    <string name="netplay_view_title">Split-screen view</string>
+    <string name="netplay_view_whole">Whole screen (split screen)</string>
+    <string name="netplay_view_top_bottom">Only my view · game splits top and bottom</string>
+    <string name="netplay_view_left_right">Only my view · game splits left and right</string>
+    <string name="netplay_view_quarters">Only my view · game splits into quarters</string>
+    <string name="netplay_view_zoom_in">Show only my view</string>
+    <string name="netplay_view_zoom_out">Show the whole screen</string>
     <string name="netplay_desynced">The two games are out of sync. Quit and start the session again.</string>
     <!-- RetroAchievements -->
     <string name="menu_achievements">Achievements</string>

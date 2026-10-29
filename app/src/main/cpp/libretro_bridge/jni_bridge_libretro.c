@@ -181,6 +181,17 @@ static volatile int g_fast_forward_enabled;
  * so both devices feed the core identical input. A guest plays on the host's
  * save memory, which must never reach the guest's own save files.
  */
+/*
+ * The part of the game image to show, as fractions of it measured from the
+ * top left: all of it normally; in split-screen multiplayer, a player can
+ * zoom in on their own part. Set from the UI thread, read on the emulation
+ * thread when a frame is presented.
+ */
+static volatile float g_view_crop[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+static GLuint g_view_fbo;
+static GLuint g_view_rbo;
+static int g_view_rbo_width;
+static int g_view_rbo_height;
 static int g_netplay_active;
 static int g_netplay_discard_saves;
 #define NETPLAY_MAX_PLAYERS 4
@@ -927,6 +938,12 @@ static void bridge_hw_destroy_context(int notify_core)
     g_bridge.hw_context_ready = 0;
     pthread_mutex_unlock(&g_bridge_mutex);
 
+    /* They go with the context. */
+    g_view_fbo = 0;
+    g_view_rbo = 0;
+    g_view_rbo_width = 0;
+    g_view_rbo_height = 0;
+
     if (display == EGL_NO_DISPLAY) {
         return;
     }
@@ -1117,6 +1134,85 @@ static int bridge_hw_ensure_ready(void)
     return bridge_hw_make_current_snapshot(display, surface, context);
 }
 
+static int bridge_view_is_cropped(void)
+{
+    return g_view_crop[0] > 0.0f || g_view_crop[1] > 0.0f || g_view_crop[2] < 1.0f || g_view_crop[3] < 1.0f;
+}
+
+/*
+ * Stretches the chosen part of the frame the core just drew over the whole
+ * surface. While zoomed, the UI pins the surface's buffer to the frame size
+ * (SurfaceHolder.setFixedSize), so the core's image fills it exactly; the view
+ * showing the buffer takes the part's shape, which undoes the stretch.
+ * The core draws straight into the window and tracks its own GL state (glsm),
+ * so everything touched here is put back as it was: the part is copied into a
+ * renderbuffer of our own and blitted back over the window, scaled.
+ */
+static void bridge_present_view_crop(EGLDisplay display, EGLSurface surface, unsigned frame_width, unsigned frame_height)
+{
+    GLint read_fbo = 0, draw_fbo = 0, rbo = 0;
+    GLboolean scissor, color_mask[4];
+    EGLint surface_width = 0, surface_height = 0;
+    int src_x, src_y, src_w, src_h;
+
+    if (!bridge_view_is_cropped() || frame_width == 0 || frame_height == 0) {
+        return;
+    }
+    eglQuerySurface(display, surface, EGL_WIDTH, &surface_width);
+    eglQuerySurface(display, surface, EGL_HEIGHT, &surface_height);
+    if (surface_width <= 0 || surface_height <= 0) {
+        return;
+    }
+
+    src_x = (int)(g_view_crop[0] * (float)frame_width);
+    src_w = (int)(g_view_crop[2] * (float)frame_width);
+    src_h = (int)(g_view_crop[3] * (float)frame_height);
+    /* GL counts rows from the bottom. */
+    src_y = (int)frame_height - (int)(g_view_crop[1] * (float)frame_height) - src_h;
+    if (src_w <= 0 || src_h <= 0) {
+        return;
+    }
+
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+    glGetIntegerv(GL_RENDERBUFFER_BINDING, &rbo);
+    scissor = glIsEnabled(GL_SCISSOR_TEST);
+    glGetBooleanv(GL_COLOR_WRITEMASK, color_mask);
+
+    if (!g_view_fbo) {
+        glGenFramebuffers(1, &g_view_fbo);
+        glGenRenderbuffers(1, &g_view_rbo);
+    }
+    if (g_view_rbo_width != src_w || g_view_rbo_height != src_h) {
+        glBindRenderbuffer(GL_RENDERBUFFER, g_view_rbo);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, src_w, src_h);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_view_fbo);
+        glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, g_view_rbo);
+        g_view_rbo_width = src_w;
+        g_view_rbo_height = src_h;
+    }
+
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_view_fbo);
+    glBlitFramebuffer(src_x, src_y, src_x + src_w, src_y + src_h, 0, 0, src_w, src_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, g_view_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBlitFramebuffer(0, 0, src_w, src_h, 0, 0, surface_width, surface_height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+
+    glColorMask(color_mask[0], color_mask[1], color_mask[2], color_mask[3]);
+    if (scissor) {
+        glEnable(GL_SCISSOR_TEST);
+    }
+    glBindRenderbuffer(GL_RENDERBUFFER, (GLuint)rbo);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw_fbo);
+}
+
 static int bridge_hw_present(unsigned width, unsigned height)
 {
     EGLDisplay display;
@@ -1140,6 +1236,8 @@ static int bridge_hw_present(unsigned width, unsigned height)
         g_bridge.frame_width = width;
         g_bridge.frame_height = height;
     }
+
+    bridge_present_view_crop(display, surface, width, height);
 
     if (!eglSwapBuffers(display, surface)) {
         bridge_set_error("eglSwapBuffers failed: 0x%04X", eglGetError());
@@ -2132,6 +2230,10 @@ static void bridge_shutdown(void)
     bridge_unload_game();
     g_netplay_active = 0;
     g_netplay_discard_saves = 0;
+    g_view_crop[0] = 0.0f;
+    g_view_crop[1] = 0.0f;
+    g_view_crop[2] = 1.0f;
+    g_view_crop[3] = 1.0f;
 
     if (g_bridge.handle && g_bridge.core_initialized) {
         g_bridge.retro_deinit();
@@ -2494,6 +2596,18 @@ Java_com_izzy2lost_nin64_NativeBridge_setCheats(JNIEnv *env, jobject thiz, jobje
         }
         (*env)->DeleteLocalRef(env, code_line);
     }
+}
+
+/* Fractions of the game image from its top left; (0, 0, 1, 1) shows all of it. */
+JNIEXPORT void JNICALL
+Java_com_izzy2lost_nin64_NativeBridge_setViewCrop(JNIEnv *env, jobject thiz, jfloat left, jfloat top, jfloat width, jfloat height)
+{
+    (void)env;
+    (void)thiz;
+    g_view_crop[0] = left;
+    g_view_crop[1] = top;
+    g_view_crop[2] = width;
+    g_view_crop[3] = height;
 }
 
 JNIEXPORT void JNICALL
