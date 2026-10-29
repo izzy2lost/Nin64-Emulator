@@ -1227,6 +1227,31 @@ class MainActivity : AppCompatActivity() {
 
     private val Int.dp: Int get() = (this * resources.displayMetrics.density).roundToInt()
 
+    /**
+     * With a controller, the game under the cursor grows a little and lifts;
+     * [style] adds each layout's own highlight. Recycled rows are reset on bind.
+     */
+    private fun highlightFocusedGame(item: View, scale: Float, style: (focused: Boolean) -> Unit) {
+        item.setOnFocusChangeListener { view, focused ->
+            style(focused)
+            view.animate()
+                .scaleX(if (focused) scale else 1f)
+                .scaleY(if (focused) scale else 1f)
+                .translationZ(if (focused) 8.dp.toFloat() else 0f)
+                .setDuration(120)
+                .start()
+        }
+    }
+
+    private fun resetFocusHighlight(item: View, scale: Float, style: (focused: Boolean) -> Unit) {
+        val focused = item.isFocused
+        style(focused)
+        item.animate().cancel()
+        item.scaleX = if (focused) scale else 1f
+        item.scaleY = if (focused) scale else 1f
+        item.translationZ = if (focused) 8.dp.toFloat() else 0f
+    }
+
     private inner class ListAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         private val strokeColors = intArrayOf(
             Color.parseColor("#0056EA"),
@@ -1239,12 +1264,28 @@ class MainActivity : AppCompatActivity() {
             val card: com.google.android.material.card.MaterialCardView =
                 itemView as com.google.android.material.card.MaterialCardView
             val text: TextView = itemView.findViewById(R.id.romTitle)
+            private val normalTextColor = text.textColors
+
+            /** Focused, the row fills with its outline colour. */
+            fun style(focused: Boolean) {
+                val color = card.strokeColor
+                card.setCardBackgroundColor(if (focused) color else Color.TRANSPARENT)
+                card.strokeWidth = ((if (focused) 3f else 1.5f) * resources.displayMetrics.density).roundToInt()
+                if (focused) {
+                    // The yellow row needs dark text.
+                    text.setTextColor(if (color == strokeColors[1]) Color.BLACK else Color.WHITE)
+                } else {
+                    text.setTextColor(normalTextColor)
+                }
+            }
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
             val view = LayoutInflater.from(parent.context)
                 .inflate(R.layout.list_item_rom, parent, false)
-            return RomViewHolder(view)
+            return RomViewHolder(view).also { holder ->
+                highlightFocusedGame(view, LIST_FOCUS_SCALE, holder::style)
+            }
         }
 
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
@@ -1252,6 +1293,7 @@ class MainActivity : AppCompatActivity() {
             val entry = romEntries[position]
             holder.text.text = entry.listLabel()
             holder.card.strokeColor = strokeColors[position % 4]
+            resetFocusHighlight(holder.itemView, LIST_FOCUS_SCALE, holder::style)
             holder.itemView.setOnClickListener {
                 val pos = holder.bindingAdapterPosition
                 if (pos != RecyclerView.NO_POSITION) {
@@ -1278,16 +1320,38 @@ class MainActivity : AppCompatActivity() {
         inner class RomViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
             val cover: ImageView = itemView.findViewById(R.id.coverImage)
             val title: TextView = itemView.findViewById(R.id.gameTitle)
+            private val coverCard: com.google.android.material.card.MaterialCardView = itemView.findViewById(R.id.coverCard)
+            private val normalTitleColor = title.textColors
+            private val focusColor = ContextCompat.getColor(this@MainActivity, R.color.brand_blue)
+
+            /** Focused, the cover gets a bold outline and the title a coloured label. */
+            fun style(focused: Boolean) {
+                coverCard.strokeColor = focusColor
+                coverCard.strokeWidth = if (focused) 4.dp else 0
+                if (focused) {
+                    title.background = GradientDrawable().apply {
+                        cornerRadius = 8.dp.toFloat()
+                        setColor(focusColor)
+                    }
+                    title.setTextColor(Color.WHITE)
+                } else {
+                    title.background = null
+                    title.setTextColor(normalTitleColor)
+                }
+            }
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
             val view = LayoutInflater.from(parent.context)
                 .inflate(R.layout.item_rom_grid, parent, false)
-            return RomViewHolder(view)
+            return RomViewHolder(view).also { holder ->
+                highlightFocusedGame(view, GRID_FOCUS_SCALE, holder::style)
+            }
         }
 
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
             holder as RomViewHolder
+            resetFocusHighlight(holder.itemView, GRID_FOCUS_SCALE, holder::style)
             // Recompute height on every bind so recycled holders get the right size after rotation.
             val rv = romRecyclerView
             val spanCount = (rv.layoutManager as? GridLayoutManager)?.spanCount ?: gridSpanCount()
@@ -1376,6 +1440,8 @@ class MainActivity : AppCompatActivity() {
         private const val VIEW_MODE_LIST = "list"
         private const val VIEW_MODE_GRID = "grid"
         private const val NO_LOAD_STATE_SLOT = -1
+        private const val GRID_FOCUS_SCALE = 1.07f
+        private const val LIST_FOCUS_SCALE = 1.03f
 
         private const val COVER_BASE_URL =
             "https://raw.githubusercontent.com/izzy2lost/n64_covers/main"
